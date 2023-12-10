@@ -643,6 +643,8 @@ indices_matrix = np.indices((h, w))
 def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	task_start_time = time.time()
 
+	error_message = ''
+
 	if shm_flags['end_flag']:
 		return
 
@@ -825,7 +827,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		for _mask in everything_masks:
 			for cached_mask_hand in mask_hand_cache.get_all():
 				contained_ratio = (cached_mask_hand & _mask).sum() / _mask.sum() if _mask.sum() != 0 else 0
-				if contained_ratio > 0.9:
+				if contained_ratio > 0.75:
 					mask_hand = mask_hand | _mask
 					break
 		if mask_hand.any():
@@ -869,7 +871,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	# mask_hand[abs(color_image_hsv[:, :, 2] - hand_h_median) > 20] = False
 
 	shm_sa['mask_hand'] = mask_hand
-	shm_sa['mask_hand_cache'].put(mask_hand)
+	mask_hand_cache.put(mask_hand)
+	shm_sa['mask_hand_cache'] = mask_hand_cache
 	##### Get mask_hand #####
 
 
@@ -959,7 +962,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['depth_valid_area'] = depth_valid_area
 	shm_sa['frame_no'] = frame_no
 
-	shm_sa['error_message'] = ''
+	shm_sa['error_message'] = error_message
 
 
 	return time.time() - task_start_time
