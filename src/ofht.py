@@ -1018,6 +1018,7 @@ if __name__ == "__main__" :
 			shm_sa['lack'] = zeros_bool
 			shm_sa['color_image_with_mask_hand'] = zeros_color
 			shm_sa['hand_bbox'] = (0, 0, w-1, h-1)
+			shm_sa['hand_bbox_size'] = 0
 			shm_sa['test'] = None
 			shm_sa['frame_no'] = 0
 			shm_sa['fps'] = 0
