@@ -160,3 +160,6 @@ output/*
 
 # Notes
 doc/note*
+
+# Test file
+src/test_files/test.py
