@@ -799,6 +799,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	##### Get mask_hand #####
 	mask_hand_cache = shm_sa['mask_hand_cache']
+	mask_hand_retrieved_cache = shm_sa['mask_hand_retrieved_cache']
 
 	# using MediaPipe
 	if (not mask_hand_cache.any()) or reset_flag:
@@ -824,8 +825,13 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 		# Generate a mask that consists of any masks contained by mask_hand_prev
 		mask_hand = zeros_bool.copy()
+		mask_occluder_prev = shm_sa['mask_occluder']
 		for _mask in everything_masks:
-			for cached_mask_hand in mask_hand_cache.get_all():
+			# ignore masks similar to prev occluder
+			if calc_iou(_mask, mask_occluder_prev) >= 0.8:
+				continue
+			# for cached_mask_hand in mask_hand_cache.get_all():
+			for cached_mask_hand in mask_hand_retrieved_cache.get_all():
 				contained_ratio = (cached_mask_hand & _mask).sum() / _mask.sum() if _mask.sum() != 0 else 0
 				if contained_ratio > 0.75:
 					mask_hand = mask_hand | _mask
@@ -947,6 +953,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	shm_sa['mask_occluder'] = mask_occluder
 	shm_sa['mask_hand_retrieved'] = mask_hand_retrieved
+	mask_hand_retrieved_cache.put(mask_hand_retrieved)
+	shm_sa['mask_hand_retrieved_cache'] = mask_hand_retrieved_cache
 
 	color_image_with_mask = add_mask(color_image, mask_occluder)
 	##### Get occluder mask #####
@@ -1017,6 +1025,7 @@ if __name__ == "__main__" :
 			shm_sa['mask_hand'] = None
 			shm_sa['mask_hand_cache'] = Cache(max_size=2)
 			shm_sa['mask_hand_retrieved'] = None
+			shm_sa['mask_hand_retrieved_cache'] = Cache(max_size=4)
 			shm_sa['color_image_with_mask'] = zeros_bool
 			shm_sa['lack'] = zeros_bool
 			shm_sa['color_image_with_mask_hand'] = zeros_color
