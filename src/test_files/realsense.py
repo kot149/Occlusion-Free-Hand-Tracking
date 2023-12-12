@@ -30,7 +30,8 @@ class Fps_Counter:
 		return self.fps
 
 # ストリーミングの設定
-w, h = 640, 480
+# w, h = 640, 480
+w, h = 848, 480
 fps = 60
 
 config = rs.config()

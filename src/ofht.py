@@ -15,7 +15,9 @@ from multiprocessing import Manager
 # Config
 ###############################################################################
 
-w, h = 640, 360
+# w, h = 1280, 720
+w, h = 848, 480
+# w, h = 640, 360
 
 input_fps = 60
 
@@ -227,6 +229,14 @@ def fix_mask(a : np.ndarray, b : np.ndarray):
 
 	return a, b, diff_a, diff_b
 
+def calc_mask_depth(mask, depth_image, depth_valid_area):
+	mask = binarize(mask)
+
+	indices = mask & depth_valid_area
+	if indices.any():
+		return np.mean(depth_image[indices])
+	else:
+		return -1
 
 def xstack(imgs : list):
 	imgs = [(gray2rgb(img) if img is not None else zeros_color) for img in imgs]
@@ -548,7 +558,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['fps'] = 0
 		# shared_fps['start_time'] = time.time()
 
-		max_workers = 3
+		max_workers = 7
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
@@ -762,6 +772,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 		hand_bbox_color = (255, 0, 0)
 
+	shm_sa['hand_depth'] = hand_depth
+
 	x1 = int(x1)
 	y1 = int(y1)
 	x2 = int(x2)
@@ -826,10 +838,17 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		# Generate a mask that consists of any masks contained by mask_hand_prev
 		mask_hand = zeros_bool.copy()
 		mask_occluder_prev = shm_sa['mask_occluder']
+
 		for _mask in everything_masks:
 			# ignore masks similar to prev occluder
 			if calc_iou(_mask, mask_occluder_prev) >= 0.8:
 				continue
+
+			# Filter-out objects behind hand
+			mask_depth = calc_mask_depth(_mask, depth_image, depth_valid_area)
+			if (mask_depth >= 0) and (mask_depth >= hand_depth * 1.2):
+				continue
+
 			# for cached_mask_hand in mask_hand_cache.get_all():
 			for cached_mask_hand in mask_hand_retrieved_cache.get_all():
 				contained_ratio = (cached_mask_hand & _mask).sum() / _mask.sum() if _mask.sum() != 0 else 0
@@ -1025,7 +1044,8 @@ if __name__ == "__main__" :
 			shm_sa['mask_hand'] = None
 			shm_sa['mask_hand_cache'] = Cache(max_size=2)
 			shm_sa['mask_hand_retrieved'] = None
-			shm_sa['mask_hand_retrieved_cache'] = Cache(max_size=4)
+			shm_sa['mask_hand_retrieved_cache'] = Cache(max_size=5)
+			shm_sa['hand_depth'] = 0
 			shm_sa['color_image_with_mask'] = zeros_bool
 			shm_sa['lack'] = zeros_bool
 			shm_sa['color_image_with_mask_hand'] = zeros_color
