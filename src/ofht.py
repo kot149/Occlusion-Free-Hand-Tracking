@@ -1,5 +1,4 @@
 import torch
-from PIL import Image
 import numpy as np
 import cv2
 
@@ -994,13 +993,121 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	return time.time() - task_start_time
 
+def e2fgvi_task_scheduler(shm_sa, shm_e2fgvi, shm_flags):
+	max_workers = 1
+	with ProcessPoolExecutor(max_workers=max_workers, initializer=None) as pool:
+		pool.submit(e2fgvi_task, shm_sa, shm_e2fgvi, shm_flags)
+
+def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
+	from PIL import Image
+	import importlib
+	from E2FGVI.core.utils import to_tensors
+
+
+	# Load model
+	net = importlib.import_module('.model.e2fgvi', package='E2FGVI')
+	model = net.InpaintGenerator().to(DEVICE)
+	data = torch.load('src/E2FGVI/release_model/E2FGVI-CVPR22.pth', map_location=DEVICE)
+	model.load_state_dict(data)
+	model.eval()
+
+
+	frame_no = 0
+	while not shm_flags['end_flag']:
+		# Wait for a new frame
+		frame_no_prev = frame_no
+		frame_no = shm_sa['frame_no']
+		while not (frame_no > frame_no_prev):
+			if shm_flags['end_flag']:
+				break
+			frame_no = shm_sa['frame_no']
+
+		color_image = shm_sa['color_image']
+		depth_image = shm_sa['depth_image']
+		depth_valid_area = shm_sa['depth_valid_area']
+		mask_occluder = shm_sa['mask_occluder']
+
+		# Load as PIL Image
+		color_image_pil = Image.fromarray(bgr2rgb(color_image))
+		mask_occluder_pil = Image.fromarray(bool2uint8(mask_occluder))
+
+		# Resize
+		size_e2fgvi = (432, 240)
+		color_image_pil = color_image_pil.resize(size_e2fgvi)
+		mask_occluder_pil = mask_occluder_pil.resize(size_e2fgvi)
+
+		color_image_pil_cache = shm_e2fgvi['color_image_pil_cache']
+		mask_occluder_pil_cache = shm_e2fgvi['mask_occluder_pil_cache']
+
+		color_image_pil_cache.put(color_image_pil)
+		mask_occluder_pil_cache.put(mask_occluder_pil)
+
+		shm_e2fgvi['color_image_pil_cache'] = color_image_pil_cache
+		shm_e2fgvi['mask_occluder_pil_cache'] = mask_occluder_pil_cache
+
+
+		# Prepare for inpainting
+		frames = color_image_pil_cache.get_all()
+		num_frames = len(frames)
+		if num_frames < 5:
+			continue
+		imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
+		frames = [np.array(f).astype(np.uint8) for f in frames]
+
+		masks = mask_occluder_pil_cache.get_all()
+		binary_masks = [
+			np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
+		]
+		masks = to_tensors()(masks).unsqueeze(0)
+		imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+		comp_frames = [None] * num_frames
+
+		selected_imgs = imgs[:1, :, :, :, :]
+		selected_masks = masks[:1, :, :, :, :]
+
+		with torch.no_grad():
+			masked_imgs = selected_imgs * (1 - selected_masks)
+			mod_size_h = 60
+			mod_size_w = 108
+			h_pad = (mod_size_h - size_e2fgvi[1] % mod_size_h) % mod_size_h
+			w_pad = (mod_size_w - size_e2fgvi[0] % mod_size_w) % mod_size_w
+			masked_imgs = torch.cat(
+				[masked_imgs, torch.flip(masked_imgs, [3])],
+				3)[:, :, :, :size_e2fgvi[1] + h_pad, :]
+			masked_imgs = torch.cat(
+				[masked_imgs, torch.flip(masked_imgs, [4])],
+				4)[:, :, :, :, :size_e2fgvi[0] + w_pad]
+			pred_imgs, _ = model(masked_imgs, 1)
+			pred_imgs = pred_imgs[:, :, :size_e2fgvi[1], :size_e2fgvi[0]]
+			pred_imgs = (pred_imgs + 1) / 2
+			pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
+			# for i in range(size_e2fgvi):
+			idx = num_frames-1
+			i = idx
+			img_inpainted = np.array(pred_imgs[i]).astype(
+				np.uint8) * binary_masks[idx] + frames[idx] * (
+					1 - binary_masks[idx])
+			# if comp_frames[idx] is None:
+			# 	comp_frames[idx] = img
+			# else:
+			# 	comp_frames[idx] = comp_frames[idx].astype(
+			# 			np.float32) * 0.5 + img.astype(np.float32) * 0.5
+			img_inpainted = bgr2rgb(img_inpainted.astype(np.uint8))
+
+		shm_e2fgvi['color_image_inpainted'] = img_inpainted
+
+		shm_e2fgvi['color_image'] = color_image
+		shm_e2fgvi['depth_image'] = depth_image
+		shm_e2fgvi['frame_no'] = frame_no
+		shm_e2fgvi['mask_occluder'] = mask_occluder
+
 
 
 ###############################################################################
 # Main
 ###############################################################################
 if __name__ == "__main__" :
-	with ThreadPoolExecutor(max_workers=3, initializer=init_process) as pool:
+	with ThreadPoolExecutor(max_workers=4, initializer=init_process) as pool:
 	# with ProcessPoolExecutor(max_workers=3, initializer=init_process) as pool:
 	# with Pool(processes=5, initializer=init_process) as pool:
 		with Manager() as manager:
@@ -1055,6 +1162,15 @@ if __name__ == "__main__" :
 			shm_sa['frame_no'] = 0
 			shm_sa['fps'] = 0
 			shm_sa['error_message'] = ''
+
+			# E2FGVI
+			shm_e2fgvi = manager.dict()
+			shm_e2fgvi['color_image'] = zeros_color
+			shm_e2fgvi['depth_image'] = zeros_gray
+			shm_e2fgvi['frame_no'] = 0
+			shm_e2fgvi['mask_occluder'] = zeros_bool
+			shm_e2fgvi['color_image_pil_cache'] = Cache(10)
+			shm_e2fgvi['mask_occluder_pil_cache'] = Cache(10)
 
 			output_dir = '../output'
 			output_filename = time.strftime('%Y-%m%d-%H%M%S')
@@ -1132,26 +1248,37 @@ if __name__ == "__main__" :
 			pool.submit(rgbd_streaming_task, shm_rgbd, shm_flags)
 			pool.submit(mediapipe_task, shm_rgbd, shm_mediapipe, shm_flags)
 			pool.submit(fastsam_task_scheduler, shm_mediapipe, shm_sa, shm_flags)
+			pool.submit(e2fgvi_task_scheduler, shm_sa, shm_e2fgvi, shm_flags)
 
 			fps_counter = Fps_Counter()
 			# Show result
 			# while True:
 			frame_no = -1
 			while not shm_flags['end_flag']:
+				# From Input
 				color_image = shm_rgbd['color_image']
 				depth_image = shm_rgbd['depth_image']
-				color_image_with_landmarks = shm_mediapipe['color_image_with_landmarks']
 
-				color_image2 = shm_sa['color_image']
-				color_image_with_mask = shm_sa['color_image_with_mask']
-				masked_hand_image = shm_sa['color_image_with_mask_hand']
-				mask_occluder = shm_sa['mask_occluder']
-				lack = shm_sa['lack']
+				# From MedaiPipe
+				# color_image_with_landmarks = shm_mediapipe['color_image_with_landmarks']
+
+				# from SA
+				# color_image_sa = shm_sa['color_image']
+				color_image_with_mask_hand = shm_sa['color_image_with_mask_hand']
+				# mask_occluder = shm_sa['mask_occluder']
 				test = shm_sa['test']
-				hand_bbox_size = shm_sa['hand_bbox_size']
+				# hand_bbox_size = shm_sa['hand_bbox_size']
+				# frame_no = shm_sa['frame_no']
+
+				# From E2FGVI
+				color_image_e2fgvi = shm_e2fgvi['color_image']
+				mask_occluder = shm_e2fgvi['mask_occluder']
+				color_image_with_mask = add_mask(color_image_e2fgvi, mask_occluder)
+				color_image_inpainted = shm_e2fgvi['color_image_inpainted']
+				frame_no = shm_e2fgvi['frame_no']
+
 
 				frame_no_prev = frame_no
-				frame_no = shm_sa['frame_no']
 
 				error_message = shm_sa['error_message']
 
@@ -1176,14 +1303,14 @@ if __name__ == "__main__" :
 					color_image
 					, depth_image
 					# , color_image_with_landmarks
-					, masked_hand_image
+					, color_image_with_mask_hand
 					, color_image_with_mask
 					, info_image
 					, test
 				])
 
 				if frame_no > frame_no_prev:
-					write(color_image2, mask_occluder)
+					write(color_image_e2fgvi, mask_occluder)
 
 				cv2.imshow("", image)
 
