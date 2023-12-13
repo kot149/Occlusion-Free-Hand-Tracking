@@ -163,3 +163,6 @@ doc/note*
 
 # Test file
 src/test_files/test.py
+
+# E2FDVI
+src/E2FGVI
