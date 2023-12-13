@@ -15,8 +15,8 @@ from multiprocessing import Manager
 ###############################################################################
 
 # w, h = 1280, 720
-w, h = 848, 480
-# w, h = 640, 360
+# w, h = 848, 480
+w, h = 640, 360
 
 input_fps = 60
 
@@ -80,6 +80,9 @@ class Cache:
 
 	def any(self):
 		return len(self.get_all()) > 0
+
+	def full(self):
+		return len(self.get_all) == self.max_size
 
 class Fps_Counter:
 	def __init__(self, cache_size=30):
@@ -441,7 +444,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 						if hand_bbox_size_adjust_count == hand_bbox_size_adjust_count_max:
 							shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] / hand_bbox_size_adjust_count_max
 
-							shm_mediapipe['ready'] = True
+							shm_flags['mediapipe_ready'] = True
 
 
 
@@ -550,94 +553,93 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 	# # fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-s.pt')
 	# fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-x.pt')
 
-	# with Manager() as manager:
-	with DummyContext():
-		# shared_fps = manager.dict()
-		# shared_fps['count'] = 0
-		# shared_fps['fps'] = 0
-		# shared_fps['start_time'] = time.time()
+	max_workers = 1
+	# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
+	with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
-		max_workers = 7
-		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
-		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
+		# Initialize process
+		def do_nothing():
+			pass
+		for _ in range(max_workers):
+			pool.submit(do_nothing)
 
-			# Initialize process
-			def do_nothing():
-				pass
-			for _ in range(max_workers):
-				pool.submit(do_nothing)
+		# Wait for MediaPipe
+		print("Waiting for MediaPipe...", end="", flush=True)
+		while not shm_flags['mediapipe_ready']:
+			time.sleep(0.01)
+		print(" Ready")
 
-			# Wait for MediaPipe
-			print("Waiting for MediaPipe...", end="")
-			while not shm_mediapipe['ready']:
-				time.sleep(0.01)
-			print(" Ready")
+		# Wait for E2FGVI
+		print("Waiting for E2FGVI...", end="", flush=True)
+		while not shm_flags['e2fgvi_ready']:
+			time.sleep(0.01)
+		print(" Ready")
 
-			print("Starting FastSAM task")
+		print("Starting FastSAM task")
 
-			fps_counter = Fps_Counter()
+		fps_counter = Fps_Counter()
 
-			def submit_subtask():
-				if shm_flags['end_flag']:
-					return
-				future = pool.submit(fastsam_task, shm_mediapipe, shm_sa, shm_flags)
-				future.add_done_callback(callback)
+		def submit_subtask():
+			if shm_flags['end_flag']:
+				return
+			future = pool.submit(fastsam_task, shm_mediapipe, shm_sa, shm_flags)
+			future.add_done_callback(callback)
 
-			def callback(future, min_delay=input_seconds_per_frame):
-				if shm_flags['end_flag']:
-					return
+		def callback(future, min_delay=input_seconds_per_frame):
+			if shm_flags['end_flag']:
+				return
 
-				global ave_count, ave_max_count, ave_sum, ave, last_submit
+			global ave_count, ave_max_count, ave_sum, ave, last_submit
 
-				ret = future.result()
-				if ret > 0:
-					# Calc average turn-around time
-					callback.fail_count = 0
-					fps = fps_counter.count()
-					shm_sa['fps'] = fps
-					ave_count += 1
-					ave_sum += ret
-					if ave_count >= ave_max_count:
-						ave = ave_sum / ave_count
-						ave_sum = 0
-						ave_count = 0
-						# print(f"ave: {ave*1000:.2f} ms")
-				else: # task failed
-					callback.fail_count += 1
-					if callback.fail_count >= 3:
-						shm_flags['reset'] = True
+			ret = future.result()
+			if ret > 0:
+				# Calc average turn-around time
+				callback.fail_count = 0
+				fps = fps_counter.count()
+				shm_sa['fps'] = fps
+				ave_count += 1
+				ave_sum += ret
+				if ave_count >= ave_max_count:
+					ave = ave_sum / ave_count
+					ave_sum = 0
+					ave_count = 0
+					# print(f"ave: {ave*1000:.2f} ms")
+			else: # task failed
+				callback.fail_count += 1
+				if callback.fail_count >= 3:
+					shm_flags['reset'] = True
 
-				if pool._queue_count >= max_workers:
-					delay = ave / max_workers
-					time.sleep(max(delay, min_delay))
-					# t1 = time.time()
-					# while time.time() - t1 < delay:
-					# 	time.sleep(0.01)
+			if pool._queue_count >= max_workers:
+				delay = ave / max_workers
+				time.sleep(max(delay, min_delay))
+				# t1 = time.time()
+				# while time.time() - t1 < delay:
+				# 	time.sleep(0.01)
 
-				# Wait for a new frame
-				# frame_no_prev = callback.frame_no
-				# callback.frame_no = shm_mediapipe['frame_no']
-				# while not (callback.frame_no > frame_no_prev):
-				# 	if shm_flags['end_flag']:
-				# 		break
-				# 	callback.frame_no = shm_mediapipe['frame_no']
+			# Wait for a new frame
+			# frame_no_prev = callback.frame_no
+			# callback.frame_no = shm_mediapipe['frame_no']
+			# while not (callback.frame_no > frame_no_prev):
+			# 	if shm_flags['end_flag']:
+			# 		break
+			# 	callback.frame_no = shm_mediapipe['frame_no']
 
-				t1 = time.time()
-				if t1 - last_submit < min_delay:
-					time.sleep(min_delay - (t1 - last_submit))
+			t1 = time.time()
+			if t1 - last_submit < min_delay:
+				time.sleep(min_delay - (t1 - last_submit))
 
-				last_submit = time.time()
+			last_submit = time.time()
 
-				submit_subtask()
-			callback.frame_no = 0
-			callback.fail_count = 0
+			submit_subtask()
+		callback.frame_no = 0
+		callback.fail_count = 0
 
-			for _ in range(max_workers):
-				submit_subtask()
-				time.sleep(input_seconds_per_frame)
+		for _ in range(max_workers):
+			submit_subtask()
+			time.sleep(input_seconds_per_frame)
 
-			while not shm_flags['end_flag']:
-				time.sleep(0.1)
+		while not shm_flags['end_flag']:
+			time.sleep(0.1)
 
 
 	shm_flags['fastsam_task_closed'] = True
@@ -1005,12 +1007,32 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 
 
 	# Load model
+	print('* Loading E2FGVI model...', flush=True)
 	net = importlib.import_module('.model.e2fgvi', package='E2FGVI')
-	model = net.InpaintGenerator().to(DEVICE)
+	e2fgvi_model = net.InpaintGenerator().to(DEVICE)
 	data = torch.load('src/E2FGVI/release_model/E2FGVI-CVPR22.pth', map_location=DEVICE)
-	model.load_state_dict(data)
-	model.eval()
+	e2fgvi_model.load_state_dict(data)
+	e2fgvi_model.eval()
+	print('* E2FGVI model loaded')
+	shm_flags['e2fgvi_ready'] = True
 
+	num_ref = 5
+	ref_length = 20
+	def get_ref_index(f, neighbor_ids, length):
+		ref_index = []
+		if num_ref == -1:
+			for i in range(0, length, ref_length):
+				if i not in neighbor_ids:
+					ref_index.append(i)
+		else:
+			start_idx = max(0, f - ref_length * (num_ref // 2))
+			end_idx = min(length, f + ref_length * (num_ref // 2))
+			for i in range(start_idx, end_idx + 1, ref_length):
+				if i not in neighbor_ids:
+					if len(ref_index) > num_ref:
+						break
+					ref_index.append(i)
+		return ref_index
 
 	frame_no = 0
 	while not shm_flags['end_flag']:
@@ -1021,6 +1043,8 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 			if shm_flags['end_flag']:
 				break
 			frame_no = shm_sa['frame_no']
+
+		print(frame_no)
 
 		color_image = shm_sa['color_image']
 		depth_image = shm_sa['depth_image']
@@ -1049,7 +1073,7 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		# Prepare for inpainting
 		frames = color_image_pil_cache.get_all()
 		num_frames = len(frames)
-		if num_frames < 5:
+		if num_frames < 25:
 			continue
 		imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
 		frames = [np.array(f).astype(np.uint8) for f in frames]
@@ -1062,8 +1086,14 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
 		comp_frames = [None] * num_frames
 
-		selected_imgs = imgs[:1, :, :, :, :]
-		selected_masks = masks[:1, :, :, :, :]
+		neighbor_stride = 5
+		neighbor_ids = [
+			i for i in range(max(0, num_frames-1 - neighbor_stride), num_frames-1)
+		]
+		ref_ids = get_ref_index(range(max(0, num_frames-1 - neighbor_stride), num_frames-1), neighbor_ids, num_frames)
+		selects = neighbor_ids + ref_ids
+		selected_imgs = imgs[:1, selects, :, :, :]
+		selected_masks = masks[:1, selects, :, :, :]
 
 		with torch.no_grad():
 			masked_imgs = selected_imgs * (1 - selected_masks)
@@ -1071,28 +1101,17 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 			mod_size_w = 108
 			h_pad = (mod_size_h - size_e2fgvi[1] % mod_size_h) % mod_size_h
 			w_pad = (mod_size_w - size_e2fgvi[0] % mod_size_w) % mod_size_w
-			masked_imgs = torch.cat(
-				[masked_imgs, torch.flip(masked_imgs, [3])],
-				3)[:, :, :, :size_e2fgvi[1] + h_pad, :]
-			masked_imgs = torch.cat(
-				[masked_imgs, torch.flip(masked_imgs, [4])],
-				4)[:, :, :, :, :size_e2fgvi[0] + w_pad]
-			pred_imgs, _ = model(masked_imgs, 1)
+			masked_imgs = torch.cat([masked_imgs, torch.flip(masked_imgs, [3])], 3)[:, :, :, :size_e2fgvi[1] + h_pad, :]
+			masked_imgs = torch.cat([masked_imgs, torch.flip(masked_imgs, [4])], 4)[:, :, :, :, :size_e2fgvi[0] + w_pad]
+			pred_imgs, _ = e2fgvi_model(masked_imgs, len(neighbor_ids))
 			pred_imgs = pred_imgs[:, :, :size_e2fgvi[1], :size_e2fgvi[0]]
 			pred_imgs = (pred_imgs + 1) / 2
 			pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
-			# for i in range(size_e2fgvi):
-			idx = num_frames-1
-			i = idx
-			img_inpainted = np.array(pred_imgs[i]).astype(
-				np.uint8) * binary_masks[idx] + frames[idx] * (
-					1 - binary_masks[idx])
-			# if comp_frames[idx] is None:
-			# 	comp_frames[idx] = img
-			# else:
-			# 	comp_frames[idx] = comp_frames[idx].astype(
-			# 			np.float32) * 0.5 + img.astype(np.float32) * 0.5
+
+			idx = neighbor_ids[-1]
+			img_inpainted = np.array(pred_imgs[-1]).astype(np.uint8) * binary_masks[idx] + frames[idx] * (1 - binary_masks[-1])
 			img_inpainted = bgr2rgb(img_inpainted.astype(np.uint8))
+			img_inpainted = cv2.resize(img_inpainted, (w, h))
 
 		shm_e2fgvi['color_image_inpainted'] = img_inpainted
 
@@ -1100,6 +1119,9 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		shm_e2fgvi['depth_image'] = depth_image
 		shm_e2fgvi['frame_no'] = frame_no
 		shm_e2fgvi['mask_occluder'] = mask_occluder
+
+	shm_flags['e2fgvi_task_closed'] = True
+	print('* E2FGVI Task Closed')
 
 
 
@@ -1117,7 +1139,10 @@ if __name__ == "__main__" :
 			shm_flags['rgbd_streaming_task_closed'] = False
 			shm_flags['mediapipe_task_closed'] = False
 			shm_flags['fastsam_task_closed'] = False
+			shm_flags['e2fgvi_task_closed'] = False
 			shm_flags['reset'] = False
+			shm_flags['mediapipe_ready'] = False
+			shm_flags['e2fgvi_ready'] = False
 
 			# RGBD Streaming
 			shm_rgbd = manager.dict()
@@ -1129,7 +1154,6 @@ if __name__ == "__main__" :
 
 			# MediaPipe
 			shm_mediapipe = manager.dict()
-			shm_mediapipe['ready'] = False
 			shm_mediapipe['coords'] = None
 			shm_mediapipe['hand_bbox_size'] = 0
 			shm_mediapipe['hand_bbox_size_adjust_count'] = 0
@@ -1169,8 +1193,9 @@ if __name__ == "__main__" :
 			shm_e2fgvi['depth_image'] = zeros_gray
 			shm_e2fgvi['frame_no'] = 0
 			shm_e2fgvi['mask_occluder'] = zeros_bool
-			shm_e2fgvi['color_image_pil_cache'] = Cache(10)
-			shm_e2fgvi['mask_occluder_pil_cache'] = Cache(10)
+			shm_e2fgvi['color_image_pil_cache'] = Cache(50)
+			shm_e2fgvi['mask_occluder_pil_cache'] = Cache(50)
+			shm_e2fgvi['color_image_inpainted'] = zeros_color
 
 			output_dir = '../output'
 			output_filename = time.strftime('%Y-%m%d-%H%M%S')
@@ -1266,6 +1291,7 @@ if __name__ == "__main__" :
 				# color_image_sa = shm_sa['color_image']
 				color_image_with_mask_hand = shm_sa['color_image_with_mask_hand']
 				# mask_occluder = shm_sa['mask_occluder']
+				# color_image_with_mask = add_mask(color_image_sa, mask_occluder)
 				test = shm_sa['test']
 				# hand_bbox_size = shm_sa['hand_bbox_size']
 				# frame_no = shm_sa['frame_no']
@@ -1305,12 +1331,14 @@ if __name__ == "__main__" :
 					# , color_image_with_landmarks
 					, color_image_with_mask_hand
 					, color_image_with_mask
+					, color_image_inpainted
 					, info_image
 					, test
 				])
 
 				if frame_no > frame_no_prev:
-					write(color_image_e2fgvi, mask_occluder)
+					# write(color_image_e2fgvi, mask_occluder)
+					pass
 
 				cv2.imshow("", image)
 
@@ -1332,6 +1360,7 @@ if __name__ == "__main__" :
 				shm_flags['rgbd_streaming_task_closed']
 				and shm_flags['mediapipe_task_closed']
 				and shm_flags['fastsam_task_closed']
+				and shm_flags['e2fgvi_task_closed']
 			):
 				time.sleep(0.1)
 

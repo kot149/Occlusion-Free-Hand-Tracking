@@ -59,6 +59,7 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 	data = torch.load('src/E2FGVI/release_model/E2FGVI-CVPR22.pth', map_location=DEVICE)
 	model.load_state_dict(data)
 	model.eval()
+	print('* E2FGVI model loaded')
 
 	frame_no = 0
 	while not shm_flags['end_flag']:
@@ -74,8 +75,8 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		depth_image = shm_sa['depth_image']
 		depth_valid_area = shm_sa['depth_valid_area']
 		# mask_occluder = shm_sa['mask_occluder']
-		color_image = cv2.imread("C:/Users/Takeuchi/Google Dirve/KIT/lab/hand-tracking/Occlusion-Free-Hand-Tracking/output/2023-1120-195227/rgb/00292.png")
-		mask_occluder = cv2.imread("C:/Users/Takeuchi/Google Dirve/KIT/lab/hand-tracking/Occlusion-Free-Hand-Tracking/output/2023-1120-195227/mask/00292.png")
+		color_image = cv2.imread("output/2023-1120-195227/rgb/00292.png")
+		mask_occluder = cv2.imread("output/2023-1120-195227/mask/00292.png")
 		mask_occluder = binarize(rgb2gray(mask_occluder))
 
 		# Load as PIL Image
@@ -86,6 +87,8 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		size_e2fgvi = (432, 240)
 		color_image_pil = color_image_pil.resize(size_e2fgvi)
 		mask_occluder_pil = mask_occluder_pil.resize(size_e2fgvi)
+		print(color_image_pil)
+		print(mask_occluder_pil)
 
 		color_image_pil_cache = shm_e2fgvi['color_image_pil_cache']
 		mask_occluder_pil_cache = shm_e2fgvi['mask_occluder_pil_cache']
@@ -100,7 +103,7 @@ def e2fgvi_task(shm_sa, shm_e2fgvi, shm_flags):
 		# Prepare for inpainting
 		frames = color_image_pil_cache.get_all()
 		num_frames = len(frames)
-		if num_frames < 5:
+		if num_frames < 10:
 			continue
 		imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
 		frames = [np.array(f).astype(np.uint8) for f in frames]

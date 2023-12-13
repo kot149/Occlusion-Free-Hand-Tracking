@@ -154,9 +154,12 @@ cython_debug/
 # AI Model Chekpoints
 FastSAM/weights/FastSAM-x.pt
 FastSAM/weights/FastSAM-s.pt
+src/E2FGVI/release_model/*
 
 # Output images/videos
 output/*
+src/E2FGVI/examples/*
+src/E2FGVI/results/*
 
 # Notes
 doc/note*
