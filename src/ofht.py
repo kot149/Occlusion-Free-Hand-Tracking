@@ -611,10 +611,11 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 				pool.submit(do_nothing)
 
 			# Wait for MediaPipe
-			print("Waiting for MediaPipe...", end="")
+			print("Waiting for MediaPipe...")
 			while not shm_mediapipe['ready']:
 				time.sleep(0.01)
-			print(" Ready")
+				if shm_flags['end_flag']:
+					break
 
 			print("Starting FastSAM task")
 
