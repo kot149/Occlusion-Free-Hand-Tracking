@@ -16,10 +16,14 @@ from multiprocessing import Manager
 ###############################################################################
 
 # w, h = 1280, 720
-w, h = 848, 480
-# w, h = 640, 360
+# w, h = 848, 480
+w, h = 640, 360
 
-input_fps = 60
+
+input_fps = 30
+
+input_from_file = True
+input_filepath = 'record/2023-1216-142823.mp4'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
@@ -46,18 +50,13 @@ def DummyContext():
 	yield None
 
 class Cache:
-	def __init__(self, max_size=0):
-		self.__cache = [None] * max_size if max_size > 0 else [None]
+	def __init__(self, max_size=-1):
+		self.__cache = []
 		self.max_size = max_size
-		self.__pointer = -1
 
 	def put(self, value):
-		if self.max_size > 0:
-			self.__pointer += 1
-			if self.__pointer == self.max_size:
-				self.__pointer = 0
-
-			self.__cache[self.__pointer] = value
+		if len(self.__cache) == self.max_size:
+			self.__cache = [*self.__cache[1:], value]
 		else:
 			self.__cache.append(value)
 
@@ -65,19 +64,16 @@ class Cache:
 		return [value for value in self.__cache if value is not None]
 
 	def get_latest(self):
-		if self.max_size > 0:
-			return self.__cache[self.__pointer]
-		else:
-			return self.__cache[-1]
+		return self.__cache[-1]
 
 	def get_oldest(self):
-		if self.max_size > 0:
-			p = self.__pointer - 1
-			if p < 0:
-				p = self.max_size-1
-			return self.__cache[p]
-		else:
-			return self.__cache[0]
+		return self.__cache[0]
+
+	def get_first_n(self, n):
+		return self.__cache[:n]
+
+	def get_last_n(self, n):
+		return self.__cache[-n:]
 
 	def any(self):
 		return len(self.get_all()) > 0
@@ -285,37 +281,82 @@ def depth_scale(depth_frame: rs.depth_frame):
 	return depth_image, ~invalid_area
 
 def rgbd_streaming_task(shm_rgbd, shm_flags):
-	config = rs.config()
-	config.enable_stream(rs.stream.depth, w, h, rs.format.z16, input_fps)
-	config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, input_fps)
-	# config.enable_record_to_file('d455data.bag')
+	if input_from_file:
+		cap = cv2.VideoCapture(input_filepath)
 
-	# colorizer = rs.colorizer()
-	aligner = rs.align(rs.stream.color) # align to color
-	# aligner = rs.align(rs.stream.depth) # align to depth
+		if cap.isOpened():
+			w_v = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 3)
+			h_v = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+			fps_v = cap.get(cv2.CAP_PROP_FPS)
+			seconds_per_frame_v = 1/fps_v
 
-	pipeline = rs.pipeline()
-	pipeline.start(config)
+			print(w_v, h_v)
 
-	fps_counter = Fps_Counter()
-	while not shm_flags['end_flag']:
-		frames = pipeline.wait_for_frames()
-		frames = aligner.process(frames)
-		color_frame = frames.get_color_frame()
-		depth_frame = frames.get_depth_frame()
-		if not (color_frame and depth_frame):
-			continue
+		fps_counter = Fps_Counter()
 
-		shm_rgbd['color_image'] = np.asanyarray(color_frame.get_data())
-		depth_image, depth_valid_area = depth_scale(depth_frame)
-		depth_image = cv2.convertScaleAbs(depth_image, alpha=1/2**8)
-		shm_rgbd['depth_image'] = depth_image
-		shm_rgbd['depth_valid_area'] = depth_valid_area
-		shm_rgbd['frame_no'] += 1
+		while cap.isOpened() and not shm_flags['end_flag']:
+			t0 = time.time()
+			ret, frame = cap.read()
+			if ret:
+				color_image = frame[:, w_v*0:w_v*1, :]
+				depth_image = frame[:, w_v*1:w_v*2, :]
+				depth_valid_area = frame[:, w_v*2:w_v*3, :]
 
-		shm_rgbd['fps'] = fps_counter.count()
+				color_image = cv2.resize(color_image, (w, h))
+				depth_image = cv2.resize(depth_image, (w, h))
+				depth_valid_area = cv2.resize(depth_valid_area, (w, h))
 
-	pipeline.stop()
+				depth_image = rgb2gray(depth_image)
+				depth_valid_area = binarize(rgb2gray(depth_valid_area))
+
+
+				shm_rgbd['color_image'] = color_image
+				shm_rgbd['depth_image'] = depth_image
+				shm_rgbd['depth_valid_area'] = depth_valid_area
+				shm_rgbd['frame_no'] += 1
+
+				shm_rgbd['fps'] = fps_counter.count()
+
+				delay = seconds_per_frame_v - (time.time() - t0)
+				if delay > 0:
+					time.sleep(delay)
+
+			else:
+				break
+
+		cap.release()
+	else:
+		config = rs.config()
+		config.enable_stream(rs.stream.depth, w, h, rs.format.z16, input_fps)
+		config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, input_fps)
+		# config.enable_record_to_file('d455data.bag')
+
+		# colorizer = rs.colorizer()
+		aligner = rs.align(rs.stream.color) # align to color
+		# aligner = rs.align(rs.stream.depth) # align to depth
+
+		pipeline = rs.pipeline()
+		pipeline.start(config)
+
+		fps_counter = Fps_Counter()
+		while not shm_flags['end_flag']:
+			frames = pipeline.wait_for_frames()
+			frames = aligner.process(frames)
+			color_frame = frames.get_color_frame()
+			depth_frame = frames.get_depth_frame()
+			if not (color_frame and depth_frame):
+				continue
+
+			shm_rgbd['color_image'] = np.asanyarray(color_frame.get_data())
+			depth_image, depth_valid_area = depth_scale(depth_frame)
+			depth_image = cv2.convertScaleAbs(depth_image, alpha=1/2**8)
+			shm_rgbd['depth_image'] = depth_image
+			shm_rgbd['depth_valid_area'] = depth_valid_area
+			shm_rgbd['frame_no'] += 1
+
+			shm_rgbd['fps'] = fps_counter.count()
+
+		pipeline.stop()
 
 	shm_flags['rgbd_streaming_task_closed'] = True
 	print("* RGBD Streaming Task Closed")
@@ -504,7 +545,8 @@ fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-x.pt')
 DEVICE = torch.device("cuda")
 def do_fastsam(img: np.ndarray, plot_to_result=False):
 	# with time_keeper("FastSAM everything_results"):
-	everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=256, conf=0.5, iou=0.9)
+	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
 
 	# with time_keeper("FastSAM prompt_process"):
 	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=DEVICE)
@@ -558,7 +600,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['fps'] = 0
 		# shared_fps['start_time'] = time.time()
 
-		max_workers = 7
+		max_workers = 4
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
@@ -740,7 +782,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		if margins_prev_large_enough[0] and margins_prev_large_enough[2]: # left-right
 			center = (x_max + x_min) // 2
 			x1 = center - hand_bbox_size // 2
-			x2 = center + hand_bbox_size // 2
+			x2 = x1 + hand_bbox_size
 		elif margins_prev_large_enough[0]: # left
 			x1 = x_min - margin
 			x2 = x1 + hand_bbox_size
@@ -753,7 +795,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		if margins_prev_large_enough[1] and margins_prev_large_enough[3]: # top-bottom
 			center = (y_max + y_min) // 2
 			y1 = center - hand_bbox_size // 2
-			y2 = center + hand_bbox_size // 2
+			y2 = y1 + hand_bbox_size
 		elif margins_prev_large_enough[1]: # top
 			y1 = y_min - margin
 			y2 = y1 + hand_bbox_size
@@ -796,15 +838,14 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		# everything_masks, v = do_fastsam(color_image_crop, plot_to_result=True)
 		# _v = color_image.copy()
 		# _v[y1:y2, x1:x2, :] = v
-		# shm_sa['test'] = _v
 	except:
 		return error(message='FastSAM failed', reset=True)
 
 	# Revert cropping
 	for i, mask_occluder in enumerate(everything_masks):
-		_mask = zeros_bool.copy()
-		_mask[y1:y2, x1:x2] = mask_occluder
-		everything_masks[i] = _mask
+		mask = zeros_bool.copy()
+		mask[y1:y2, x1:x2] = mask_occluder
+		everything_masks[i] = mask
 
 	##### Do FastSAM #####
 
@@ -824,14 +865,14 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	else:
 		# Split distinct masks
 		_everything_masks = []
-		for _mask in everything_masks:
-			_mask = bool2uint8(_mask)
-			num_labels, label_matrix = cv2.connectedComponents(_mask)
+		for mask in everything_masks:
+			mask = bool2uint8(mask)
+			num_labels, label_matrix = cv2.connectedComponents(mask)
 
 			for i in range(num_labels-1):
-				_mask = (label_matrix == i+1) # [0] is background
-				_mask = binarize(_mask)
-				_everything_masks.append(_mask)
+				mask = (label_matrix == i+1) # [0] is background
+				mask = binarize(mask)
+				_everything_masks.append(mask)
 
 		everything_masks = _everything_masks
 
@@ -839,24 +880,33 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		mask_hand = zeros_bool.copy()
 		mask_occluder_prev = shm_sa['mask_occluder']
 
-		for _mask in everything_masks:
-			# ignore masks similar to prev occluder
-			if calc_iou(_mask, mask_occluder_prev) >= 0.8:
-				continue
+		# Find a mask similar to prev occluder
+		ious = [calc_iou(mask, mask_occluder_prev) for mask in everything_masks]
+		iou_argmax = argmax(ious)
+		if ious[iou_argmax] > 0.5:
+			mask_occluder = everything_masks[iou_argmax]
+		else:
+			mask_occluder = zeros_bool.copy()
 
-			# Filter-out objects behind hand
-			mask_depth = calc_mask_depth(_mask, depth_image, depth_valid_area)
-			if (mask_depth >= 0) and (mask_depth >= hand_depth * 1.2):
-				continue
+		# for mask in everything_masks:
+		# 	# ignore masks similar to prev occluder
+		# 	mask = mask & (~mask_occluder)
 
-			# for cached_mask_hand in mask_hand_cache.get_all():
-			for cached_mask_hand in mask_hand_retrieved_cache.get_all():
-				contained_ratio = (cached_mask_hand & _mask).sum() / _mask.sum() if _mask.sum() != 0 else 0
-				if contained_ratio > 0.75:
-					mask_hand = mask_hand | _mask
-					break
-		if mask_hand.any():
-			# everything_masks.append(mask_hand)
+		# 	# Filter-out objects behind hand
+		# 	mask_depth = calc_mask_depth(mask, depth_image, depth_valid_area)
+		# 	if (mask_depth >= 0) and (mask_depth >= hand_depth * 1.2):
+		# 		continue
+
+		# 	for cached_mask_hand in mask_hand_cache.get_all():
+		# 	# for cached_mask_hand in mask_hand_retrieved_cache.get_all():
+		# 		contained_ratio = (cached_mask_hand & mask).sum() / mask.sum() if mask.any() else 0
+		# 		if contained_ratio > 0.5:
+		# 			mask_hand = mask_hand | mask
+		# 			break
+		# if mask_hand.any():
+		# 	everything_masks.append(mask_hand)
+		# 	# pass
+		if False:
 			pass
 		else:
 			ious = [calc_iou_fixed(mask, mask_hand_prev) for mask in everything_masks]
@@ -910,17 +960,17 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 
 	masks_in_front_of_hand = []
-	_mask = depth_mask & (~mask_hand)
+	mask = depth_mask & (~mask_hand)
 	# _mask = depth_mask
 	for mask_occluder in everything_masks:
-		if calc_iou(mask_occluder, _mask & mask_occluder) >= 0.4:
+		if calc_iou(mask_occluder, mask & mask_occluder) >= 0.4:
 			masks_in_front_of_hand.append(mask_occluder & (~mask_hand))
 			# masks.append(mask & _mask)
 
 	# Compose all masks into one image
 	mask_in_front_of_hand = zeros_bool.copy()
-	for _mask in masks_in_front_of_hand:
-		mask_in_front_of_hand = mask_in_front_of_hand | _mask
+	for mask in masks_in_front_of_hand:
+		mask_in_front_of_hand = mask_in_front_of_hand | mask
 
 	mask_occluder = zeros_bool
 	mask_hand_retrieved = zeros_bool
@@ -964,7 +1014,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		for mask in everything_masks:
 			mask = mask & (~mask_hand)
 			ratio =  (mask & mask_occluder).sum() / mask_occluder.sum()
-			if ratio > 0.75:
+			if ratio > 0.5:
 				mask_occluder_object = mask_occluder_object | mask
 
 	mask_occluder = mask_occluder_object
@@ -1042,7 +1092,7 @@ if __name__ == "__main__" :
 			shm_sa['depth_valid_area'] = zeros_bool
 			shm_sa['mask_occluder'] = zeros_bool
 			shm_sa['mask_hand'] = None
-			shm_sa['mask_hand_cache'] = Cache(max_size=2)
+			shm_sa['mask_hand_cache'] = Cache(max_size=5)
 			shm_sa['mask_hand_retrieved'] = None
 			shm_sa['mask_hand_retrieved_cache'] = Cache(max_size=5)
 			shm_sa['hand_depth'] = 0
@@ -1195,6 +1245,14 @@ if __name__ == "__main__" :
 				elif key == ord('r'):
 					shm_flags['reset'] = True
 					shm_mediapipe['hand_bbox_size_adjust_count'] = 0
+
+				if (
+					shm_flags['rgbd_streaming_task_closed']
+					or shm_flags['mediapipe_task_closed']
+					or shm_flags['fastsam_task_closed']
+				):
+					shm_flags['end_flag'] = True
+					break
 
 				time.sleep(0.005)
 

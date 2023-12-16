@@ -157,6 +157,7 @@ FastSAM/weights/FastSAM-s.pt
 
 # Output images/videos
 output/*
+record/*
 
 # Notes
 doc/note*
