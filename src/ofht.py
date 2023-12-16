@@ -19,10 +19,9 @@ from multiprocessing import Manager
 # w, h = 848, 480
 w, h = 640, 360
 
-
 input_fps = 30
 
-input_from_file = True
+input_from_file = False
 input_filepath = 'record/2023-1216-142823.mp4'
 
 record_in_video_cv2 = False
@@ -327,8 +326,8 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 		cap.release()
 	else:
 		config = rs.config()
-		config.enable_stream(rs.stream.depth, w, h, rs.format.z16, input_fps)
 		config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, input_fps)
+		config.enable_stream(rs.stream.depth, w, h, rs.format.z16, input_fps)
 		# config.enable_record_to_file('d455data.bag')
 
 		# colorizer = rs.colorizer()
@@ -344,12 +343,15 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 			frames = aligner.process(frames)
 			color_frame = frames.get_color_frame()
 			depth_frame = frames.get_depth_frame()
+
 			if not (color_frame and depth_frame):
 				continue
 
-			shm_rgbd['color_image'] = np.asanyarray(color_frame.get_data())
+			color_image = np.asanyarray(color_frame.get_data())
 			depth_image, depth_valid_area = depth_scale(depth_frame)
 			depth_image = cv2.convertScaleAbs(depth_image, alpha=1/2**8)
+
+			shm_rgbd['color_image'] = color_image
 			shm_rgbd['depth_image'] = depth_image
 			shm_rgbd['depth_valid_area'] = depth_valid_area
 			shm_rgbd['frame_no'] += 1

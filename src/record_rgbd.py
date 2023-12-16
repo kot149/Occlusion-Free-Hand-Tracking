@@ -5,8 +5,11 @@ import math
 import time
 import os
 
-w, h = 848, 480
-input_fps = 60
+# w, h = 1280, 720
+# w, h = 848, 480
+w, h = 640, 360
+
+input_fps = 30
 
 output_dir = 'record'
 zeros_color = np.zeros((h, w, 3), dtype=np.uint8)
