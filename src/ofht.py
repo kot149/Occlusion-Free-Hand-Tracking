@@ -169,6 +169,8 @@ def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 	return result
 
 def centroid(img: np.ndarray):
+	if not img.any():
+		return None
 	if img.dtype == bool:
 		img = img * np.ones((h, w), dtype=np.uint8)
 	m = cv2.moments(img)
@@ -212,15 +214,21 @@ def fix_mask(a : np.ndarray, b : np.ndarray):
 	a = binarize(a, threshold=1)
 	b = binarize(b, threshold=1)
 
-	a_center = np.array(centroid(a))
-	b_center = np.array(centroid(b))
+	a_center = centroid(a)
+	b_center = centroid(b)
 
-	diff = b_center - a_center
-	diff_a = diff // 2
-	diff_b = -diff + diff_a
+	if (a_center is not None) and (b_center is not None):
+		a_center = np.array(a_center)
+		b_center = np.array(b_center)
+		diff = b_center - a_center
+		diff_a = diff // 2
+		diff_b = -diff + diff_a
 
-	a = translate(a, diff_a[0], diff_a[1])
-	b = translate(b, diff_b[0], diff_b[1])
+		a = translate(a, diff_a[0], diff_a[1])
+		b = translate(b, diff_b[0], diff_b[1])
+	else:
+		diff_a = np.array([0, 0])
+		diff_b = np.array([0, 0])
 
 	return a, b, diff_a, diff_b
 
