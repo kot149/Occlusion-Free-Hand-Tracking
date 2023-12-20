@@ -22,7 +22,7 @@ w, h = 640, 360
 input_fps = 30
 
 input_from_file = False
-input_filepath = 'record/2023-1216-142823.mp4'
+input_filepath = r'record\2023-1219-141409.mp4'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
@@ -434,8 +434,8 @@ hand_bbox_size_adjust_count_max = 10
 def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	with mp_hands.Hands(
 		model_complexity=0,
-		min_detection_confidence=0.9,
-		min_tracking_confidence=0.9,
+		min_detection_confidence=0.2,
+		min_tracking_confidence=0.5,
 		# num_hands=1
 	) as hands:
 		frame_no = 0
@@ -474,8 +474,8 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 						coords = coords / np.arctan(coords / depth_image[coords[0, 1], coords[0, 0]])
 
 						# mean = np.mean(coords, axis=0)
-						std = np.std(coords, axis=0)
-						hand_bbox_size = 1 / np.mean(std) * 1250
+						std = np.std(coords, axis=0, ddof=1)
+						hand_bbox_size = np.mean(std) * 13
 
 						shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] + hand_bbox_size
 
@@ -547,8 +547,8 @@ fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-x.pt')
 DEVICE = torch.device("cuda")
 def do_fastsam(img: np.ndarray, plot_to_result=False):
 	# with time_keeper("FastSAM everything_results"):
-	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
-	everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
 
 	# with time_keeper("FastSAM prompt_process"):
 	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=DEVICE)
@@ -891,25 +891,25 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		else:
 			mask_occluder = zeros_bool.copy()
 
-		# for mask in everything_masks:
-		# 	# ignore masks similar to prev occluder
-		# 	mask = mask & (~mask_occluder)
+		for mask in everything_masks:
+			# ignore masks similar to prev occluder
+			mask = mask & (~mask_occluder)
 
-		# 	# Filter-out objects behind hand
-		# 	mask_depth = calc_mask_depth(mask, depth_image, depth_valid_area)
-		# 	if (mask_depth >= 0) and (mask_depth >= hand_depth * 1.2):
-		# 		continue
+			# Filter-out objects behind hand
+			mask_depth = calc_mask_depth(mask, depth_image, depth_valid_area)
+			if (mask_depth >= 0) and (mask_depth >= hand_depth * 1.2):
+				continue
 
-		# 	for cached_mask_hand in mask_hand_cache.get_all():
-		# 	# for cached_mask_hand in mask_hand_retrieved_cache.get_all():
-		# 		contained_ratio = (cached_mask_hand & mask).sum() / mask.sum() if mask.any() else 0
-		# 		if contained_ratio > 0.5:
-		# 			mask_hand = mask_hand | mask
-		# 			break
-		# if mask_hand.any():
-		# 	everything_masks.append(mask_hand)
-		# 	# pass
-		if False:
+			for cached_mask_hand in mask_hand_cache.get_all():
+			# for cached_mask_hand in mask_hand_retrieved_cache.get_all():
+				contained_ratio = (cached_mask_hand & mask).sum() / mask.sum() if mask.any() else 0
+				if contained_ratio > 0.5:
+					mask_hand = mask_hand | mask
+					break
+		if mask_hand.any():
+			everything_masks.append(mask_hand)
+			# pass
+		if True:
 			pass
 		else:
 			ious = [calc_iou_fixed(mask, mask_hand_prev) for mask in everything_masks]
@@ -999,7 +999,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		# 	lack = lack | _lack
 
 		lack = bool2uint8(lack)
-		lack = cv2.morphologyEx(lack, cv2.MORPH_CLOSE, kernel=np.ones((5, 5), np.uint8), iterations = 1)
+		lack = cv2.morphologyEx(lack, cv2.MORPH_CLOSE, kernel=np.ones((5, 5), np.uint8), iterations = 3)
 		lack = binarize(lack, threshold=1)
 
 		mask_hand_retrieved = mask_hand | lack
@@ -1017,7 +1017,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		for mask in everything_masks:
 			mask = mask & (~mask_hand)
 			ratio =  (mask & mask_occluder).sum() / mask_occluder.sum()
-			if ratio > 0.5:
+			if ratio > 0.25:
+			# if (mask & mask_occluder).sum() > 100:
 				mask_occluder_object = mask_occluder_object | mask
 
 	mask_occluder = mask_occluder_object
@@ -1109,7 +1110,7 @@ if __name__ == "__main__" :
 			shm_sa['fps'] = 0
 			shm_sa['error_message'] = ''
 
-			output_dir = '../output'
+			output_dir = 'output'
 			output_filename = time.strftime('%Y-%m%d-%H%M%S')
 			output_filepath = os.path.join(output_dir, output_filename)
 			os.makedirs(output_dir, exist_ok=True)
