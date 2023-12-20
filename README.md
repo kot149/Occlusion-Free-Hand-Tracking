@@ -23,7 +23,7 @@
 # 使用方法
 ## セットアップ
 ```
-conda create -n ofht python=3.8
+conda create -n ofht python=3.11
 conda activate ofht
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
