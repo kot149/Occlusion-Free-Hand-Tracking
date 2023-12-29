@@ -152,18 +152,20 @@ cython_debug/
 #.idea/
 
 # AI Model Chekpoints
-FastSAM/weights/FastSAM-x.pt
-FastSAM/weights/FastSAM-s.pt
+model_checkpoint/
 
 # Output images/videos
 output/*
 record/*
 
-# Notes
-doc/note*
+# doc
+doc/
 
 # Test file
 src/test_files/test.py
 
 # E2FDVI
 src/E2FGVI
+
+# Track-Anything
+src/track_anything

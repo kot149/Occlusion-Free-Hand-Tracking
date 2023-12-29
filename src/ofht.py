@@ -19,7 +19,7 @@ from multiprocessing import Manager
 # w, h = 848, 480
 w, h = 640, 360
 
-input_fps = 30
+input_fps = 60
 
 input_from_file = False
 input_filepath = r'record\2023-1219-141409.mp4'
@@ -28,6 +28,7 @@ record_in_video_cv2 = False
 record_in_video_ffmpeg = False
 record_in_images = False
 
+device = torch.device("cuda")
 
 input_seconds_per_frame = 1 / input_fps
 
@@ -153,6 +154,7 @@ def bgr2rgb(img: np.ndarray):
 	return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
+	mask = binarize(mask, threshold=1)
 	result = image_base.copy()
 	color = np.array(color)
 
@@ -374,6 +376,13 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 
 
 ###############################################################################
+# Track-Anything
+###############################################################################
+from track_anything.tracker.base_tracker import BaseTracker
+xmem_checkpoint = 'model_checkpoint/XMem-s012.pth'
+
+
+###############################################################################
 # MediaPipe
 ###############################################################################
 import mediapipe as mp
@@ -406,7 +415,7 @@ def draw_landmarks(image, multi_hand_landmarks):
 
 	return image
 
-def get_landmarks_coords(image, multi_hand_landmarks):
+def get_landmark_coords(image, multi_hand_landmarks):
 	result = []
 	h, w, _ = image.shape
 
@@ -438,14 +447,17 @@ def calc_landmark_presition(mask_img, landmark_coords):
 	result = result / landmarks_count
 	return result
 
-hand_bbox_size_adjust_count_max = 10
+# hand_bbox_size_adjust_count_max = 10
 def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	with mp_hands.Hands(
 		model_complexity=0,
 		min_detection_confidence=0.2,
-		min_tracking_confidence=0.5,
+		min_tracking_confidence=0.8,
 		# num_hands=1
 	) as hands:
+		tracker = BaseTracker(xmem_checkpoint, device)
+		mask_hand = None
+
 		frame_no = 0
 		fps_counter = Fps_Counter()
 		while not shm_flags['end_flag']:
@@ -465,15 +477,16 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 
 			# When MediaPipe succeeded
 			if mp_result and mp_result.multi_hand_landmarks:
-				landmarks_coords = get_landmarks_coords(color_image, mp_result.multi_hand_landmarks)
-				shm_mediapipe['coords'] = landmarks_coords
-				landmarks_coords = np.array(landmarks_coords)
+				landmark_coords = get_landmark_coords(color_image, mp_result.multi_hand_landmarks)
+				shm_mediapipe['coords'] = landmark_coords
+				landmark_coords = np.array(landmark_coords)
 
+				"""
 				hand_bbox_size_adjust_count = shm_mediapipe['hand_bbox_size_adjust_count']
 				if hand_bbox_size_adjust_count < hand_bbox_size_adjust_count_max:
 
 					# Check if all coords are valid
-					coords = landmarks_coords[[0, 1, 5, 9, 13, 17]]
+					coords = landmark_coords[[0, 1, 5, 9, 13, 17]]
 					for _coord in coords:
 						if not depth_valid_area[_coord[1], _coord[0]]:
 							break
@@ -494,6 +507,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 							shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] / hand_bbox_size_adjust_count_max
 
 							shm_mediapipe['ready'] = True
+				"""
 
 
 
@@ -506,10 +520,10 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				# 	y1 = int(y1 * h)
 				# 	y2 = int(y2 * h)
 				# else:
-				x1 = np.min(landmarks_coords[:, 0])
-				y1 = np.min(landmarks_coords[:, 1])
-				x2 = np.max(landmarks_coords[:, 0])
-				y2 = np.max(landmarks_coords[:, 1])
+				x1 = np.min(landmark_coords[:, 0])
+				y1 = np.min(landmark_coords[:, 1])
+				x2 = np.max(landmark_coords[:, 0])
+				y2 = np.max(landmark_coords[:, 1])
 
 				# crop_margin = 0.25
 				# margin_x = int((x2 - x1) * crop_margin)
@@ -524,7 +538,45 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				x2 = min(x2, w-1)
 				y2 = min(y2, h-1)
 
-				shm_mediapipe['hand_center'] = ((x1 + x2) // 2, (y1 + y2) // 2)
+				hand_center = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+				if mask_hand is None or shm_flags['reset']:
+					half_hand_bbox_size = int((max(x2 - x1, y2 - y1) * 1.3) / 2)
+					x1 = hand_center[0] - half_hand_bbox_size
+					x2 = hand_center[0] + half_hand_bbox_size
+					y1 = hand_center[1] - half_hand_bbox_size
+					y2 = hand_center[1] + half_hand_bbox_size
+
+					x1 = max(x1, 0)
+					y1 = max(y1, 0)
+					x2 = min(x2, w-1)
+					y2 = min(y2, h-1)
+
+					color_image_crop = color_image[y1:y2, x1:x2, :]
+
+					everything_masks = do_fastsam(color_image_crop)
+
+					# Revert cropping
+					for i, mask in enumerate(everything_masks):
+						tmp = zeros_bool.copy()
+						tmp[y1:y2, x1:x2] = mask
+						everything_masks[i] = tmp
+
+
+					presitions = [calc_landmark_presition(mask, landmark_coords) for mask in everything_masks]
+					presitions_argmax = argmax(presitions)
+					mask_hand = everything_masks[presitions_argmax]
+
+					mask_hand2, prob, _ = tracker.track(color_image, mask_hand)
+					shm_mediapipe['ready'] = True
+					shm_flags['reset'] = False
+				else:
+					mask_hand, prob, _ = tracker.track(color_image)
+					mask_hand = binarize(mask_hand, threshold=1)
+
+				shm_mediapipe['mask_hand'] = mask_hand
+
+				shm_mediapipe['hand_center'] = hand_center
 
 				color_image_with_landmarks = color_image.copy()
 				color_image_with_landmarks = draw_landmarks(color_image_with_landmarks, mp_result.multi_hand_landmarks)
@@ -544,22 +596,21 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	print("* MediaPipe Task Closed")
 
 
-
 ###############################################################################
 # FastSAM
 ###############################################################################
 import fastsam
-# fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-s.pt')
-fastSAM_model = fastsam.FastSAM('FastSAM/weights/FastSAM-x.pt')
+# fastSAM_model = fastsam.FastSAM('model_checkpoint/FastSAM-s.pt')
+fastSAM_model = fastsam.FastSAM('model_checkpoint/FastSAM-x.pt')
 
-DEVICE = torch.device("cuda")
+
 def do_fastsam(img: np.ndarray, plot_to_result=False):
 	# with time_keeper("FastSAM everything_results"):
-	everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
 	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
 
 	# with time_keeper("FastSAM prompt_process"):
-	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=DEVICE)
+	# prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 
 	# Everything Prompt
 	# with time_keeper("FastSAM anns"):
@@ -581,13 +632,16 @@ def do_fastsam(img: np.ndarray, plot_to_result=False):
 	# with time_keeper("FastSAM plot_to_result"):
 	# global fastsam_visualization
 	if plot_to_result:
+		prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 		plot = prompt_process.plot_to_result(annotations=anns, mask_random_color=True)
 	# cv2.imshow("FastSam Visualization", fastsam_visualization)
 
+	masks = [ann.cpu().numpy() == 1 for ann in anns]
+
 	if plot_to_result:
-		return [ann.cpu().numpy() for ann in anns], plot
+		return masks, plot
 	else:
-		return [ann.cpu().numpy() for ann in anns]
+		return masks
 
 def fastsam_subprocess_init():
 	do_fastsam(zeros_color)
@@ -610,7 +664,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['fps'] = 0
 		# shared_fps['start_time'] = time.time()
 
-		max_workers = 4
+		max_workers = 3
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
@@ -739,6 +793,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 
 	##### Get hand bounding box #####
+	"""
 	# using MediaPipe
 	if mask_hand_prev is None or reset_flag:
 	# if True:
@@ -840,6 +895,40 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	color_image_crop = color_image[y1:y2, x1:x2, :]
 	shm_sa['hand_bbox'] = (x1, y1, x2, y2)
 	shm_sa['hand_bbox_size'] = hand_bbox_size
+	"""
+
+	# Using Track-Anything
+	mask_hand = shm_mediapipe['mask_hand']
+	indices_x = indices_matrix[1][mask_hand]
+	indices_y = indices_matrix[0][mask_hand]
+	x_min = np.min(indices_x)
+	y_min = np.min(indices_y)
+	x_max = np.max(indices_x)
+	y_max = np.max(indices_y)
+
+	print(x_min, x_max, y_min, y_max)
+
+	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.3) / 2)
+	hand_center = ((x_max + x_min)/2, (y_max + y_min)/2)
+
+	x1 = hand_center[0] - half_hand_bbox_size
+	x2 = hand_center[0] + half_hand_bbox_size
+	y1 = hand_center[1] - half_hand_bbox_size
+	y2 = hand_center[1] + half_hand_bbox_size
+
+	x1 = int(x1)
+	y1 = int(y1)
+	x2 = int(x2)
+	y2 = int(y2)
+
+	x1 = max(x1, 0)
+	y1 = max(y1, 0)
+	x2 = min(x2, w-1)
+	y2 = min(y2, h-1)
+
+	hand_bbox_color = [0, 255, 0]
+
+	color_image_crop = color_image[y1:y2, x1:x2, :]
 	##### Get hand bounding box #####
 
 
@@ -853,17 +942,19 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		return error(message='FastSAM failed', reset=True)
 
 	# Revert cropping
-	for i, mask_occluder in enumerate(everything_masks):
-		mask = zeros_bool.copy()
-		mask[y1:y2, x1:x2] = mask_occluder
-		everything_masks[i] = mask
+	for i, mask in enumerate(everything_masks):
+		tmp = zeros_bool.copy()
+		tmp[y1:y2, x1:x2] = mask
+		everything_masks[i] = tmp
 
 	##### Do FastSAM #####
 
 
 	##### Get mask_hand #####
+	"""
 	mask_hand_cache = shm_sa['mask_hand_cache']
 	mask_hand_retrieved_cache = shm_sa['mask_hand_retrieved_cache']
+
 
 	# using MediaPipe
 	if (not mask_hand_cache.any()) or reset_flag:
@@ -959,6 +1050,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['mask_hand'] = mask_hand
 	mask_hand_cache.put(mask_hand)
 	shm_sa['mask_hand_cache'] = mask_hand_cache
+	"""
 	##### Get mask_hand #####
 
 
@@ -1034,8 +1126,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	shm_sa['mask_occluder'] = mask_occluder
 	shm_sa['mask_hand_retrieved'] = mask_hand_retrieved
-	mask_hand_retrieved_cache.put(mask_hand_retrieved)
-	shm_sa['mask_hand_retrieved_cache'] = mask_hand_retrieved_cache
+	# mask_hand_retrieved_cache.put(mask_hand_retrieved)
+	# shm_sa['mask_hand_retrieved_cache'] = mask_hand_retrieved_cache
 
 	color_image_with_mask = add_mask(color_image, mask_occluder)
 	##### Get occluder mask #####
@@ -1090,6 +1182,7 @@ if __name__ == "__main__" :
 			shm_mediapipe['hand_bbox_size_adjust_count'] = 0
 			shm_mediapipe['hand_bbox'] = (0, 0, w-1, h-1)
 			shm_mediapipe['hand_center'] = (0, 0)
+			shm_mediapipe['mask_hand'] = zeros_bool
 			shm_mediapipe['color_image'] = zeros_color
 			shm_mediapipe['depth_image'] = zeros_gray
 			shm_mediapipe['depth_valid_area'] = zeros_bool
@@ -1204,7 +1297,11 @@ if __name__ == "__main__" :
 				depth_image = shm_rgbd['depth_image']
 				color_image_with_landmarks = shm_mediapipe['color_image_with_landmarks']
 
-				color_image2 = shm_sa['color_image']
+				color_image2 = shm_mediapipe['color_image']
+				mask_hand = shm_mediapipe['mask_hand']
+				color_image2 = add_mask(color_image2, mask_hand)
+
+				color_image3 = shm_sa['color_image']
 				color_image_with_mask = shm_sa['color_image_with_mask']
 				masked_hand_image = shm_sa['color_image_with_mask_hand']
 				mask_occluder = shm_sa['mask_occluder']
@@ -1241,11 +1338,12 @@ if __name__ == "__main__" :
 					, masked_hand_image
 					, color_image_with_mask
 					, info_image
-					, test
+					# , test
+					, color_image2
 				])
 
 				if frame_no > frame_no_prev:
-					write(color_image2, mask_occluder)
+					write(color_image3, mask_occluder)
 
 				cv2.imshow("", image)
 

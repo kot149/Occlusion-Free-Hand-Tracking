@@ -3,7 +3,7 @@ import numpy as np
 import os
 import time
 
-output_dir = '../output/' + '2023-1120-195227'
+output_dir = r'output/2023-1221-141141'
 
 def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 
@@ -15,7 +15,7 @@ def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 	# alpha = 0.3
 
 	# result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
-	# mask_edge = (~mask) & binarize(cv2.morphologyEx(bool2uint8(mask), cv2.MORPH_DILATE, kernel=np.ones((7, 7), np.uint8), iterations = 1), threshold=1)
+	# mask_edge = (~mask) & binarize(cv2.morphologyEx(bool2uint8(mask)	, cv2.MORPH_DILATE, kernel=np.ones((7, 7), np.uint8), iterations = 1), threshold=1)
 	# result[mask_edge] = color
 
 	result[mask] = color
@@ -90,6 +90,6 @@ while True:
 	if key == 27: # esc
 		break
 
-	time.sleep(0.023)
+	time.sleep(0.02)
 
 cv2.destroyAllWindows()
