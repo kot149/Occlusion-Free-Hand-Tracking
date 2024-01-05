@@ -1051,6 +1051,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	mask_hand_cache.put(mask_hand)
 	shm_sa['mask_hand_cache'] = mask_hand_cache
 	"""
+	shm_sa['mask_hand'] = mask_hand
 	##### Get mask_hand #####
 
 
