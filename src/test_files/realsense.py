@@ -2,30 +2,27 @@ import pyrealsense2 as rs
 import numpy as np
 import cv2
 import time
+from collections import deque
 
 class Fps_Counter:
-	def __init__(self, bufsize=30):
+	def __init__(self, cache_size=30):
 		self.fps = -1
-		self._count = -1
-		self._bufsize = bufsize
-		self.start()
+		self.cache_size = cache_size
+		self.init()
 
-	def start(self):
-		self._buf = np.zeros(self._bufsize)
-		self._timestamp = time.time()
+	def init(self):
+		self.__cache = deque(maxlen=self.cache_size)
+		self.__timestamp = time.time()
+		self.fps = 0
 
 
 	def count(self):
-		self._count += 1
-		if self._count == self._bufsize:
-			self._count = 0
-
 		t = time.time()
-		self._buf[self._count] = t - self._timestamp
-		self._timestamp = t
+		self.__cache.append(t - self.__timestamp)
+		self.__timestamp = t
 
-		ave = np.mean(self._buf[self._buf != 0])
-		self.fps = 1 / ave
+		ave = np.mean(self.__cache)
+		self.fps = 1 / ave if ave != 0 else 0
 
 		return self.fps
 
