@@ -243,6 +243,20 @@ def calc_mask_depth(mask, depth_image, depth_valid_area):
 	else:
 		return -1
 
+def mask_depth_stat(mask, depth_image, depth_valid_area):
+	mask = binarize(mask)
+
+	indices = mask & depth_valid_area
+	if indices.any():
+		values = depth_image[indices]
+		min = np.min(values)
+		max = np.max(values)
+		median = np.median(values)
+		std = np.std(values)
+		return min, max, median, std
+	else:
+		return None
+
 def xstack(imgs : list):
 	imgs = [(gray2rgb(img) if img is not None else zeros_color) for img in imgs]
 	n = len(imgs)
@@ -906,8 +920,6 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	x_max = np.max(indices_x)
 	y_max = np.max(indices_y)
 
-	print(x_min, x_max, y_min, y_max)
-
 	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.3) / 2)
 	hand_center = ((x_max + x_min)/2, (y_max + y_min)/2)
 
@@ -1052,11 +1064,18 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['mask_hand_cache'] = mask_hand_cache
 	"""
 	shm_sa['mask_hand'] = mask_hand
+
+	# Remove mask_hand from everything_masks
+	ious = [calc_iou(mask, mask_hand) for mask in everything_masks]
+	iou_argmax = argmax(ious)
+	if ious[iou_argmax] > 0.75:
+		del everything_masks[iou_argmax]
 	##### Get mask_hand #####
 
 
 	##### Get occluder mask #####
 	# Get depth mask
+	"""
 	depth_image_hand = depth_image * mask_hand
 	depth_thresh = depth_image_hand.sum() / (mask_hand.sum()) # Average depth in mask_hand
 	# depth_threshold += 30
@@ -1070,6 +1089,20 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		if calc_iou(mask_occluder, mask & mask_occluder) >= 0.4:
 			masks_in_front_of_hand.append(mask_occluder & (~mask_hand))
 			# masks.append(mask & _mask)
+	"""
+	masks_in_front_of_hand = []
+	stat = mask_depth_stat(mask_hand, depth_image, depth_valid_area)
+	if stat is not None:
+		mask_hand_depth_min, mask_hand_depth_max, mask_hand_depth_median, mask_hand_depth_std = stat
+		for mask in everything_masks:
+			# if calc_iou(mask, mask_hand) > 0.8:
+			# 	continue
+			stat = mask_depth_stat(mask, depth_image, depth_valid_area)
+			if stat is None:
+				continue
+			mask_depth_min, mask_depth_max, mask_depth_median, mask_depth_std = stat
+			if mask_depth_median < mask_hand_depth_median:
+				masks_in_front_of_hand.append(mask)
 
 	# Compose all masks into one image
 	mask_in_front_of_hand = zeros_bool.copy()
@@ -1115,11 +1148,19 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	# Find occluder object
 	mask_occluder_object = zeros_bool.copy()
 	if mask_occluder.any():
-		for mask in everything_masks:
-			mask = mask & (~mask_hand)
-			ratio =  (mask & mask_occluder).sum() / mask_occluder.sum()
-			if ratio > 0.25:
-			# if (mask & mask_occluder).sum() > 100:
+		for mask in masks_in_front_of_hand:
+			# mask = mask & (~mask_hand)
+			# ratio =  (mask & mask_occluder).sum() / mask_occluder.sum()
+			# if ratio > 0.25:
+			m = mask & mask_occluder
+			if not m.any():
+				continue
+			stat = mask_depth_stat(m, depth_image, depth_valid_area)
+			if stat is None:
+				continue
+
+			m_min, m_max, m_median, m_std = stat
+			if (m_median < mask_hand_depth_median):
 				mask_occluder_object = mask_occluder_object | mask
 
 	mask_occluder = mask_occluder_object
