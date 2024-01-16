@@ -136,12 +136,27 @@ def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 	alpha = 0.3
 
 	result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
-	mask_edge = (~mask) & binarize(cv2.morphologyEx(bool2uint8(mask), cv2.MORPH_DILATE, kernel=np.ones((7, 7), np.uint8), iterations = 1), threshold=1)
-	result[mask_edge] = color
+	edge = mask_edge(mask, thickness=5)
+	result[edge] = color
 
 	# result[mask] = color
 
 	return result
+
+def binaryMorphologyEx(src, op, kernel, **kwargs):
+	src = bool2uint8(src)
+	res = cv2.morphologyEx(src, op, kernel, **kwargs)
+	res = binarize(res, threshold=1)
+	if 'dst' in kwargs:
+		kwargs['dst'] = binarize(kwargs['dst'], threshold=1)
+	return res
+
+def mask_edge(mask:np.ndarray, thickness:int=1):
+	kernel_size = thickness+1
+	kernel = np.ones((kernel_size, kernel_size), np.uint8)
+	dilated = binaryMorphologyEx(mask, cv2.MORPH_DILATE, kernel=kernel, iterations = 1)
+	edge = dilated & (~mask)
+	return edge
 
 def centroid(img: np.ndarray):
 	if not img.any():
@@ -216,10 +231,9 @@ def calc_mask_depth(mask, depth_image, depth_valid_area):
 	else:
 		return -1
 
-def mask_depth_stat(mask, depth_image, depth_valid_area):
-	mask = bool2uint8(mask)
-	mask = cv2.erode(mask, np.ones((15, 15)), iterations=1)
-	mask = binarize(mask)
+def mask_depth_stat(mask, depth_image, depth_valid_area, erosion_kernel_size=15):
+	if erosion_kernel_size > 0:
+		mask = binaryMorphologyEx(mask, cv2.MORPH_ERODE, np.ones((erosion_kernel_size, erosion_kernel_size)), iterations=1)
 
 	indices = mask & depth_valid_area
 	if indices.any():
@@ -1085,6 +1099,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 			if mask_depth_max <= mask_hand_depth_max-mask_hand_depth_std and mask_depth_std < 30:
 				masks_in_front_of_hand.append(mask)
 	else:
+		mask_hand_depth_min, mask_hand_depth_max, mask_hand_depth_median, mask_hand_depth_std = None, None, None, None
 		error_message = 'No depth in mask_hand is valid'
 
 	# Compose all masks into one image
@@ -1095,6 +1110,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	mask_occluder = zeros_bool
 	mask_hand_retrieved = zeros_bool
 
+	"""
 	# Retrieve mask_hand
 	if (mask_hand is not None) and (mask_hand_prev is not None):
 		lack_prev = shm_sa['lack']
@@ -1149,6 +1165,24 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 			# m_min, m_max, m_median, m_std = stat
 			# if (m_median < mask_hand_depth_median):
 			# 	mask_occluder_object = mask_occluder_object | mask
+
+	mask_occluder = mask_occluder_object
+	"""
+
+	mask_occluder_object = zeros_bool.copy()
+	mask_hand_edge = mask_edge(mask_hand, thickness=10)
+	for mask in masks_in_front_of_hand:
+		m = mask & mask_hand_edge
+		if not m.any():
+			continue
+
+		stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=3)
+		if stat is None:
+			continue
+
+		m_depth_min, m_depth_max, m_depth_median, m_depth_std = stat
+		if m_depth_min < mask_hand_depth_max:
+			mask_occluder_object = mask_occluder_object | mask
 
 	mask_occluder = mask_occluder_object
 
@@ -1326,9 +1360,9 @@ if __name__ == "__main__" :
 				depth_image = shm_rgbd['depth_image']
 				color_image_with_landmarks = shm_mediapipe['color_image_with_landmarks']
 
-				color_image2 = shm_mediapipe['color_image']
-				mask_hand = shm_mediapipe['mask_hand']
-				color_image2 = add_mask(color_image2, mask_hand)
+				# color_image2 = shm_mediapipe['color_image']
+				# mask_hand = shm_mediapipe['mask_hand']
+				# color_image2 = add_mask(color_image2, mask_hand)
 
 				color_image3 = shm_sa['color_image']
 				color_image_with_mask = shm_sa['color_image_with_mask']
@@ -1370,7 +1404,7 @@ if __name__ == "__main__" :
 					, color_image_with_mask
 					, info_image
 					# , test
-					, color_image2
+					# , color_image2
 				])
 
 				if frame_no > frame_no_prev:
