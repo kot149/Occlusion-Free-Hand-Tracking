@@ -127,18 +127,19 @@ def bgr2rgb(img: np.ndarray):
 
 def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 	mask = binarize(mask, threshold=1)
+	image_base = gray2rgb(image_base)
 	result = image_base.copy()
 	color = np.array(color)
 
-	# mask_color = zeros_color.copy()
-	# mask_color[mask] = color
-	# alpha = 0.3
+	mask_color = zeros_color.copy()
+	mask_color[mask] = color
+	alpha = 0.3
 
-	# result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
-	# mask_edge = (~mask) & binarize(cv2.morphologyEx(bool2uint8(mask), cv2.MORPH_DILATE, kernel=np.ones((7, 7), np.uint8), iterations = 1), threshold=1)
-	# result[mask_edge] = color
+	result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
+	mask_edge = (~mask) & binarize(cv2.morphologyEx(bool2uint8(mask), cv2.MORPH_DILATE, kernel=np.ones((7, 7), np.uint8), iterations = 1), threshold=1)
+	result[mask_edge] = color
 
-	result[mask] = color
+	# result[mask] = color
 
 	return result
 
@@ -216,6 +217,8 @@ def calc_mask_depth(mask, depth_image, depth_valid_area):
 		return -1
 
 def mask_depth_stat(mask, depth_image, depth_valid_area):
+	mask = bool2uint8(mask)
+	mask = cv2.erode(mask, np.ones((15, 15)), iterations=1)
 	mask = binarize(mask)
 
 	indices = mask & depth_valid_area
@@ -252,7 +255,7 @@ def xstack(imgs : list):
 import pyrealsense2 as rs
 
 def depth_scale(depth_frame: rs.depth_frame):
-	scope_in_meter = (0.5, 1.5) # [meter]
+	scope_in_meter = (0.3, 1.5) # [meter]
 
 	depth_image = np.asanyarray(depth_frame.get_data())
 	dtype = depth_image.dtype
@@ -443,6 +446,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	) as hands:
 		tracker = BaseTracker(xmem_checkpoint, device)
 		mask_hand = None
+		tracker_initialized = False
 
 		frame_no = 0
 		fps_counter = Fps_Counter()
@@ -554,21 +558,24 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					mask_hand = everything_masks[presitions_argmax]
 
 					mask_hand2, prob, _ = tracker.track(color_image, mask_hand)
+					tracker_initialized = True
 					shm_mediapipe['ready'] = True
 					shm_flags['reset'] = False
-				else:
-					mask_hand, prob, _ = tracker.track(color_image)
-					mask_hand = binarize(mask_hand, threshold=1)
 
+			if tracker_initialized:
+				mask_hand, prob, _ = tracker.track(color_image)
+				mask_hand = binarize(mask_hand, threshold=1)
+
+			if mask_hand is not None:
 				shm_mediapipe['mask_hand'] = mask_hand
 
-				shm_mediapipe['hand_center'] = hand_center
+			shm_mediapipe['hand_center'] = hand_center
 
-				color_image_with_landmarks = color_image.copy()
-				color_image_with_landmarks = draw_landmarks(color_image_with_landmarks, mp_result.multi_hand_landmarks)
+			color_image_with_landmarks = color_image.copy()
+			color_image_with_landmarks = draw_landmarks(color_image_with_landmarks, mp_result.multi_hand_landmarks)
 
-				# color_image_with_landmarks = cv2.rectangle(color_image_with_landmarks, pt1=(x1, y1), pt2=(x2, y2), color=(0, 0, 255))
-				shm_mediapipe['color_image_with_landmarks'] = color_image_with_landmarks
+			# color_image_with_landmarks = cv2.rectangle(color_image_with_landmarks, pt1=(x1, y1), pt2=(x2, y2), color=(0, 0, 255))
+			shm_mediapipe['color_image_with_landmarks'] = color_image_with_landmarks
 
 
 			shm_mediapipe['color_image'] = color_image
@@ -892,7 +899,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	x_max = np.max(indices_x)
 	y_max = np.max(indices_y)
 
-	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.3) / 2)
+	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.4) / 2)
 	hand_center = ((x_max + x_min)/2, (y_max + y_min)/2)
 
 	x1 = hand_center[0] - half_hand_bbox_size
@@ -1040,7 +1047,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	# Remove mask_hand from everything_masks
 	ious = [calc_iou(mask, mask_hand) for mask in everything_masks]
 	iou_argmax = argmax(ious)
-	if ious[iou_argmax] > 0.75:
+	if ious[iou_argmax] > 0.5:
 		del everything_masks[iou_argmax]
 	##### Get mask_hand #####
 
@@ -1066,6 +1073,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	stat = mask_depth_stat(mask_hand, depth_image, depth_valid_area)
 	if stat is not None:
 		mask_hand_depth_min, mask_hand_depth_max, mask_hand_depth_median, mask_hand_depth_std = stat
+		error_message = f'min {mask_hand_depth_min:3.2f}, max {mask_hand_depth_max:3.2f},\nmed {mask_hand_depth_median:3.2f}, std {mask_hand_depth_std:3.2f}'
 		for mask in everything_masks:
 			# if calc_iou(mask, mask_hand) > 0.8:
 			# 	continue
@@ -1073,8 +1081,11 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 			if stat is None:
 				continue
 			mask_depth_min, mask_depth_max, mask_depth_median, mask_depth_std = stat
-			if mask_depth_median < mask_hand_depth_median:
+			# if mask_depth_max <= mask_hand_depth_max:
+			if mask_depth_max <= mask_hand_depth_max-mask_hand_depth_std and mask_depth_std < 30:
 				masks_in_front_of_hand.append(mask)
+	else:
+		error_message = 'No depth in mask_hand is valid'
 
 	# Compose all masks into one image
 	mask_in_front_of_hand = zeros_bool.copy()
@@ -1125,15 +1136,19 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 			# ratio =  (mask & mask_occluder).sum() / mask_occluder.sum()
 			# if ratio > 0.25:
 			m = mask & mask_occluder
-			if not m.any():
-				continue
-			stat = mask_depth_stat(m, depth_image, depth_valid_area)
-			if stat is None:
-				continue
 
-			m_min, m_max, m_median, m_std = stat
-			if (m_median < mask_hand_depth_median):
+			if m.any():
 				mask_occluder_object = mask_occluder_object | mask
+
+			# if not m.any():
+			# 	continue
+			# stat = mask_depth_stat(m, depth_image, depth_valid_area)
+			# if stat is None:
+			# 	continue
+
+			# m_min, m_max, m_median, m_std = stat
+			# if (m_median < mask_hand_depth_median):
+			# 	mask_occluder_object = mask_occluder_object | mask
 
 	mask_occluder = mask_occluder_object
 
@@ -1339,11 +1354,13 @@ if __name__ == "__main__" :
 
 				cv2.putText(info_image, 'Info', (10, 120), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 				if error_message:
-					cv2.putText(info_image, 'Error:', (40, 150), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), thickness=2)
-					cv2.putText(info_image, error_message, (150, 150), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+					row = 150
+					cv2.putText(info_image, 'Error:', (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), thickness=2)
+					for line in error_message.split('\n'):
+						cv2.putText(info_image, line, (150, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+						row += 30
 				# cv2.putText(info_image, 'bbox:' + str(hand_bbox_size), (40, 180), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 				# cv2.putText(info_image, str(shm_sa['fps']), (40, 210), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
-
 
 				image = xstack([
 					color_image
