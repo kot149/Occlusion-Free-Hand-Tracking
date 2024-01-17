@@ -3,7 +3,8 @@ import numpy as np
 import os
 import time
 
-output_dir = r'output/2023-1221-141141'
+output_dir = r'output\2024-0117-172913'
+fps = 24
 
 def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 
@@ -65,6 +66,7 @@ def bgr2rgb(img: np.ndarray):
 count = 0
 t0 = time.time()
 while True:
+	t = time.time()
 	count += 1
 	filename = f'{count:0>5}.png'
 	filename_rgb = os.path.join(output_dir, 'rgb', filename)
@@ -90,6 +92,8 @@ while True:
 	if key == 27: # esc
 		break
 
-	time.sleep(0.02)
+	delay = 1/fps - (time.time() - t)
+	if delay > 0:
+		time.sleep(delay)
 
 cv2.destroyAllWindows()

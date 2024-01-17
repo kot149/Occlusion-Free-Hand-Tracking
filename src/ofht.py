@@ -240,9 +240,17 @@ def mask_depth_stat(mask, depth_image, depth_valid_area, erosion_kernel_size=15)
 		values = depth_image[indices]
 		min = np.min(values)
 		max = np.max(values)
-		median = np.median(values)
 		std = np.std(values)
-		return min, max, median, std
+		q = np.percentile(values, [25, 50, 75])
+		return {
+			'min': min,
+			'max': max,
+			'1/4': q[0],
+			'2/4': q[1],
+			'med': q[1],
+			'3/4': q[2],
+			'std': std
+		}
 	else:
 		return None
 
@@ -913,7 +921,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	x_max = np.max(indices_x)
 	y_max = np.max(indices_y)
 
-	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.4) / 2)
+	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.7) / 2)
 	hand_center = ((x_max + x_min)/2, (y_max + y_min)/2)
 
 	x1 = hand_center[0] - half_hand_bbox_size
@@ -947,9 +955,9 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		return error(message='FastSAM failed', reset=True)
 
 	# Revert cropping
-	for i, mask in enumerate(everything_masks):
+	for i, m in enumerate(everything_masks):
 		tmp = zeros_bool.copy()
-		tmp[y1:y2, x1:x2] = mask
+		tmp[y1:y2, x1:x2] = m
 		everything_masks[i] = tmp
 
 	##### Do FastSAM #####
@@ -1059,10 +1067,23 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['mask_hand'] = mask_hand
 
 	# Remove mask_hand from everything_masks
-	ious = [calc_iou(mask, mask_hand) for mask in everything_masks]
-	iou_argmax = argmax(ious)
-	if ious[iou_argmax] > 0.5:
-		del everything_masks[iou_argmax]
+
+	mask_hand_edge = mask_edge(mask_hand, thickness=30)
+	_everything_masks = []
+	for m in everything_masks:
+		iou = calc_iou(mask_hand, m & mask_hand)
+		if not (iou > 0.5):
+		# m_edge = mask_edge(m, thickness=30)
+		# if not (calc_iou(m_edge, m_edge & mask_hand_edge) > 0.5):
+			_everything_masks.append(m)
+	everything_masks = _everything_masks
+
+	# ious = [calc_iou(m, m & mask_hand) for m in everything_masks]
+	# iou_argmax = argmax(ious)
+	# if ious[iou_argmax] > 0.4:
+	# 	del everything_masks[iou_argmax]
+
+	# everything_masks = [m & (~mask_hand) for m in everything_masks]
 	##### Get mask_hand #####
 
 
@@ -1084,28 +1105,29 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 			# masks.append(mask & _mask)
 	"""
 	masks_in_front_of_hand = []
-	stat = mask_depth_stat(mask_hand, depth_image, depth_valid_area)
-	if stat is not None:
-		mask_hand_depth_min, mask_hand_depth_max, mask_hand_depth_median, mask_hand_depth_std = stat
-		error_message = f'min {mask_hand_depth_min:3.2f}, max {mask_hand_depth_max:3.2f},\nmed {mask_hand_depth_median:3.2f}, std {mask_hand_depth_std:3.2f}'
-		for mask in everything_masks:
+	mask_hand_depth_stat = mask_depth_stat(mask_hand, depth_image, depth_valid_area, erosion_kernel_size=15)
+	if mask_hand_depth_stat is not None:
+		for m in everything_masks:
 			# if calc_iou(mask, mask_hand) > 0.8:
 			# 	continue
-			stat = mask_depth_stat(mask, depth_image, depth_valid_area)
-			if stat is None:
+			m_depth_stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=15)
+			if m_depth_stat is None:
 				continue
-			mask_depth_min, mask_depth_max, mask_depth_median, mask_depth_std = stat
-			# if mask_depth_max <= mask_hand_depth_max:
-			if mask_depth_max <= mask_hand_depth_max-mask_hand_depth_std and mask_depth_std < 30:
-				masks_in_front_of_hand.append(mask)
+			# a = -1
+			a = m_depth_stat['min']
+			# a = m_depth_stat['max'] if m_depth_stat['max'] < 250 else m_depth_stat['min']+(m_depth_stat['med']-m_depth_stat['min'])*1.5
+			b = mask_hand_depth_stat['max'] if mask_hand_depth_stat['max'] < 250 else mask_hand_depth_stat['min']+(mask_hand_depth_stat['med']-mask_hand_depth_stat['min'])*2
+			if (a < b) and (m_depth_stat['med'] < 250) and (m_depth_stat['std'] < 8):
+				masks_in_front_of_hand.append(m)
 	else:
-		mask_hand_depth_min, mask_hand_depth_max, mask_hand_depth_median, mask_hand_depth_std = None, None, None, None
 		error_message = 'No depth in mask_hand is valid'
 
+	"""
 	# Compose all masks into one image
 	mask_in_front_of_hand = zeros_bool.copy()
-	for mask in masks_in_front_of_hand:
-		mask_in_front_of_hand = mask_in_front_of_hand | mask
+	for m in masks_in_front_of_hand:
+		mask_in_front_of_hand = mask_in_front_of_hand | m
+	"""
 
 	mask_occluder = zeros_bool
 	mask_hand_retrieved = zeros_bool
@@ -1170,19 +1192,22 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	"""
 
 	mask_occluder_object = zeros_bool.copy()
-	mask_hand_edge = mask_edge(mask_hand, thickness=10)
-	for mask in masks_in_front_of_hand:
-		m = mask & mask_hand_edge
-		if not m.any():
+	# mask_hand_edge = mask_edge(mask_hand, thickness=10)
+	for m in masks_in_front_of_hand:
+		m_ = m & mask_hand_edge
+		if not m_.any():
 			continue
+		else:
+			mask_occluder_object = mask_occluder_object | m
+		continue
 
 		stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=3)
 		if stat is None:
 			continue
 
 		m_depth_min, m_depth_max, m_depth_median, m_depth_std = stat
-		if m_depth_min < mask_hand_depth_max:
-			mask_occluder_object = mask_occluder_object | mask
+		if m_depth_median < mask_hand_depth_max+m_depth_std:
+			mask_occluder_object = mask_occluder_object | m
 
 	mask_occluder = mask_occluder_object
 
