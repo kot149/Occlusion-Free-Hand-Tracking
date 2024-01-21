@@ -281,19 +281,21 @@ def depth_scale(depth_frame: rs.depth_frame):
 
 	depth_image = np.asanyarray(depth_frame.get_data())
 	dtype = depth_image.dtype
+	max_val = np.iinfo(dtype).max
 
-	invalid_area = (depth_image == 0)
-	depth_image[invalid_area] -= 1
 
 	depth_unit = depth_frame.get_units() # [meter/bit]
 	scope_in_bit =  (scope_in_meter[0] // depth_unit, scope_in_meter[1] // depth_unit) # [bit]
+
+	invalid_area = (depth_image < scope_in_bit[0])
 
 	# Trim out-of-scope values
 	depth_image[depth_image < scope_in_bit[0]] = scope_in_bit[0]
 	depth_image[depth_image > scope_in_bit[1]] = scope_in_bit[1]
 
 	# Scale
-	depth_image = (depth_image - scope_in_bit[0]) * (np.iinfo(dtype).max // (scope_in_bit[1] - scope_in_bit[0]))
+	depth_image = (depth_image - scope_in_bit[0]) * (max_val // (scope_in_bit[1] - scope_in_bit[0]))
+	depth_image[invalid_area] = max_val
 
 	# Histgram equalization
 	# depth_image = cv2.equalizeHist(depth_image)
@@ -914,6 +916,13 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	# Using Track-Anything
 	mask_hand = shm_mediapipe['mask_hand']
+	if mask_hand is None or mask_hand.sum() < 1000:
+		mask_hand = shm_sa['mask_hand']
+		hand_invisible = True
+	else:
+		hand_invisible = False
+	if mask_hand is None or not mask_hand.any():
+		error('mask_hand is None')
 	indices_x = indices_matrix[1][mask_hand]
 	indices_y = indices_matrix[0][mask_hand]
 	x_min = np.min(indices_x)
@@ -921,7 +930,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	x_max = np.max(indices_x)
 	y_max = np.max(indices_y)
 
-	half_hand_bbox_size = int((max(x_max - x_min, y_max - y_min) * 1.7) / 2)
+	half_hand_bbox_size = max(int((max(x_max - x_min, y_max - y_min) * 1.9) / 2), 100)
 	hand_center = ((x_max + x_min)/2, (y_max + y_min)/2)
 
 	x1 = hand_center[0] - half_hand_bbox_size
@@ -1069,14 +1078,15 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	# Remove mask_hand from everything_masks
 
 	mask_hand_edge = mask_edge(mask_hand, thickness=30)
-	_everything_masks = []
-	for m in everything_masks:
-		iou = calc_iou(mask_hand, m & mask_hand)
-		if not (iou > 0.5):
-		# m_edge = mask_edge(m, thickness=30)
-		# if not (calc_iou(m_edge, m_edge & mask_hand_edge) > 0.5):
-			_everything_masks.append(m)
-	everything_masks = _everything_masks
+	if not hand_invisible:
+		_everything_masks = []
+		for m in everything_masks:
+			iou = calc_iou(mask_hand, m & mask_hand)
+			if not (iou > 0.75):
+			# m_edge = mask_edge(m, thickness=30)
+			# if not (calc_iou(m_edge, m_edge & mask_hand_edge) > 0.5):
+				_everything_masks.append(m)
+		everything_masks = _everything_masks
 
 	# ious = [calc_iou(m, m & mask_hand) for m in everything_masks]
 	# iou_argmax = argmax(ious)
@@ -1106,18 +1116,29 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	"""
 	masks_in_front_of_hand = []
 	mask_hand_depth_stat = mask_depth_stat(mask_hand, depth_image, depth_valid_area, erosion_kernel_size=15)
+	if mask_hand_depth_stat is None or hand_invisible:
+		mask_hand_depth_stat = shm_sa['mask_hand_depth_stat']
 	if mask_hand_depth_stat is not None:
+		shm_sa['mask_hand_depth_stat'] = mask_hand_depth_stat
 		for m in everything_masks:
 			# if calc_iou(mask, mask_hand) > 0.8:
 			# 	continue
-			m_depth_stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=15)
+			m_depth_stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=5)
 			if m_depth_stat is None:
 				continue
 			# a = -1
-			a = m_depth_stat['min']
-			# a = m_depth_stat['max'] if m_depth_stat['max'] < 250 else m_depth_stat['min']+(m_depth_stat['med']-m_depth_stat['min'])*1.5
-			b = mask_hand_depth_stat['max'] if mask_hand_depth_stat['max'] < 250 else mask_hand_depth_stat['min']+(mask_hand_depth_stat['med']-mask_hand_depth_stat['min'])*2
-			if (a < b) and (m_depth_stat['med'] < 250) and (m_depth_stat['std'] < 8):
+			# a = m_depth_stat['min']
+			# a = m_depth_stat['1/4']
+			# a = m_depth_stat['med']
+			# a = m_depth_stat['3/4']
+			a = m_depth_stat['3/4'] if m_depth_stat['3/4'] < 250 else m_depth_stat['med']
+			# a = m_depth_stat['max'] if m_depth_stat['max'] < 250 else m_depth_stat['3/4']
+			b = mask_hand_depth_stat['max'] if mask_hand_depth_stat['max'] < 250 else mask_hand_depth_stat['3/4']
+			if (
+				(a < b)
+				and (m_depth_stat['med'] < 250)
+				# and (m_depth_stat['std'] < 30)
+			):
 				masks_in_front_of_hand.append(m)
 	else:
 		error_message = 'No depth in mask_hand is valid'
@@ -1289,6 +1310,7 @@ if __name__ == "__main__" :
 			shm_sa['mask_hand_retrieved'] = None
 			# shm_sa['mask_hand_retrieved_cache'] = Cache(max_size=5)
 			shm_sa['hand_depth'] = 0
+			shm_sa['mask_hand_depth_stat'] = None
 			shm_sa['color_image_with_mask'] = zeros_bool
 			shm_sa['lack'] = zeros_bool
 			shm_sa['color_image_with_mask_hand'] = zeros_color

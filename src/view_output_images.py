@@ -3,7 +3,7 @@ import numpy as np
 import os
 import time
 
-output_dir = r'output\2024-0117-172913'
+output_dir = r'output\2024-0118-160554'
 fps = 24
 
 def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
