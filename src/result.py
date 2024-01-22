@@ -146,7 +146,8 @@ if __name__ == '__main__':
 	min_detection_confidence = 0.1
 	min_tracking_confidence = 0.8
 
-	input_dir = r'C:\Users\Ku0143\GoogleDrive_k\KIT\lab\hand-tracking\Occlusion-Free-Hand-Tracking\output'
+	# input_dir = r'C:\Users\Ku0143\GoogleDrive_k\KIT\lab\hand-tracking\Occlusion-Free-Hand-Tracking\output'
+	input_dir = r'C:\Users\Takeuchi\Documents\GitHub\Occlusion-Free-Hand-Tracking\output'
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
 	print('Reading frames...')
 	frames_rgb, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
@@ -226,7 +227,23 @@ if __name__ == '__main__':
 					failure_count2 += 1
 					f_inpainted_with_landmark = f_inpainted
 
-				result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark])
+				info_message = f"""Parameters
+    min_detection_confidence: {min_detection_confidence}
+    min_tracking_confidence: {min_tracking_confidence}
+
+Tracking failure count
+    Original video:  {failure_count:4}
+    Inpainted video: {failure_count2:4}
+"""
+				row = 30
+				info_image = zeros_color.copy()
+
+				for line in info_message.split('\n'):
+					cv2.putText(info_image, line, (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+					row += 30
+
+
+				result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
 				writer.write(result)
 				cv2.imshow('result', result)
 
@@ -237,13 +254,6 @@ if __name__ == '__main__':
 				delay = 1/fps - (time.time() - t)
 				if delay > 0:
 					time.sleep(delay)
-
-	print(f"""パラメータ:
-	min_detection_confidence: {min_detection_confidence}
-	min_tracking_confidence: {min_tracking_confidence}
-
-推定に失敗したフレーム数: 元動画 {failure_count} / 復元動画 {failure_count2}
-""")
 
 	writer.release()
 	cv2.destroyAllWindows()
