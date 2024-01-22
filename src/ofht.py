@@ -34,6 +34,8 @@ device = torch.device("cuda")
 
 if input_from_file and __name__ == '__main__':
 	input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+	if not input_filepath:
+		exit(-1)
 	print("Input file: ", input_filepath)
 input_seconds_per_frame = 1 / input_fps
 
