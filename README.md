@@ -29,6 +29,8 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
+Download XMem model checkpoint from https://github.com/hkchengrex/XMem/releases/tag/v1.0
+
 ## 実行
 ```
 python src/ofht.py
