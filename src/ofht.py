@@ -1327,7 +1327,10 @@ if __name__ == "__main__" :
 			shm_sa['error_message'] = ''
 
 			output_dir = 'output'
-			output_filename = time.strftime('%Y-%m%d-%H%M%S')
+			if input_from_file:
+				output_filename = os.path.splitext(os.path.basename((input_filepath)))[0]
+			else:
+				output_filename = time.strftime('%Y-%m%d-%H%M%S')
 			output_filepath = os.path.join(output_dir, output_filename)
 			os.makedirs(output_dir, exist_ok=True)
 
