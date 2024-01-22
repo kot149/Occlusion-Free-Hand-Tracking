@@ -10,6 +10,7 @@ import ffmpeg
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from multiprocessing import Manager
 from collections import deque
+from tkinter import filedialog
 
 
 ###############################################################################
@@ -23,7 +24,7 @@ w, h = 640, 360
 input_fps = 30
 
 input_from_file = True
-input_filepath = r'record\2024-0122-123406.mp4'
+input_filepath = r'record'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
@@ -31,6 +32,9 @@ record_in_images = False
 
 device = torch.device("cuda")
 
+if input_from_file and __name__ == '__main__':
+	input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+	print("Input file: ", input_filepath)
 input_seconds_per_frame = 1 / input_fps
 
 ###############################################################################
@@ -915,7 +919,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	# Using Track-Anything
 	mask_hand = shm_mediapipe['mask_hand']
-	if mask_hand is None or mask_hand.sum() < 1000:
+	if mask_hand is None or mask_hand.sum() < 500:
 		mask_hand = shm_sa['mask_hand']
 		hand_invisible = True
 	else:
