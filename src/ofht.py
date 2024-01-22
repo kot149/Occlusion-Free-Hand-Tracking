@@ -20,10 +20,10 @@ from collections import deque
 # w, h = 848, 480
 w, h = 640, 360
 
-input_fps = 60
+input_fps = 30
 
-input_from_file = False
-input_filepath = r'record\2023-1219-141409.mp4'
+input_from_file = True
+input_filepath = r'record\2024-0122-123406.mp4'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
@@ -393,7 +393,6 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 ###############################################################################
 from track_anything.tracker.base_tracker import BaseTracker
 xmem_checkpoint = 'model_checkpoint/XMem-s012.pth'
-
 
 ###############################################################################
 # MediaPipe
