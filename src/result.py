@@ -146,9 +146,10 @@ if __name__ == '__main__':
 	min_detection_confidence = 0.1
 	min_tracking_confidence = 0.8
 
-	# input_dir = r'C:\Users\Ku0143\GoogleDrive_k\KIT\lab\hand-tracking\Occlusion-Free-Hand-Tracking\output'
-	input_dir = r'C:\Users\Takeuchi\Documents\GitHub\Occlusion-Free-Hand-Tracking\output'
+	input_dir = r'output'
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
+	if not input_dir:
+		exit(-1)
 	print('Reading frames...')
 	frames_rgb, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
 	frames_mask, fps = read_frames_from_images(os.path.join(input_dir, 'mask'))
