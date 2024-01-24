@@ -23,7 +23,7 @@ w, h = 640, 360
 
 input_fps = 30
 
-input_from_file = True
+input_from_file = False
 input_filepath = r'record'
 
 record_in_video_cv2 = False
@@ -475,6 +475,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	) as hands:
 		tracker = BaseTracker(xmem_checkpoint, device)
 		mask_hand = None
+		hand_center = shm_mediapipe['hand_center']
 		tracker_initialized = False
 
 		frame_no = 0
@@ -559,7 +560,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 
 				hand_center = ((x1 + x2) // 2, (y1 + y2) // 2)
 
-				if mask_hand is None or shm_flags['reset']:
+				if (not tracker_initialized) or shm_flags['reset']:
 					half_hand_bbox_size = int((max(x2 - x1, y2 - y1) * 1.3) / 2)
 					x1 = hand_center[0] - half_hand_bbox_size
 					x2 = hand_center[0] + half_hand_bbox_size
@@ -591,6 +592,13 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					shm_mediapipe['ready'] = True
 					shm_flags['reset'] = False
 
+
+				color_image_with_landmarks = color_image.copy()
+				color_image_with_landmarks = draw_landmarks(color_image_with_landmarks, mp_result.multi_hand_landmarks)
+
+				# color_image_with_landmarks = cv2.rectangle(color_image_with_landmarks, pt1=(x1, y1), pt2=(x2, y2), color=(0, 0, 255))
+				shm_mediapipe['color_image_with_landmarks'] = color_image_with_landmarks
+
 			if tracker_initialized:
 				mask_hand, prob, _ = tracker.track(color_image)
 				mask_hand = binarize(mask_hand, threshold=1)
@@ -599,13 +607,6 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				shm_mediapipe['mask_hand'] = mask_hand
 
 			shm_mediapipe['hand_center'] = hand_center
-
-			color_image_with_landmarks = color_image.copy()
-			color_image_with_landmarks = draw_landmarks(color_image_with_landmarks, mp_result.multi_hand_landmarks)
-
-			# color_image_with_landmarks = cv2.rectangle(color_image_with_landmarks, pt1=(x1, y1), pt2=(x2, y2), color=(0, 0, 255))
-			shm_mediapipe['color_image_with_landmarks'] = color_image_with_landmarks
-
 
 			shm_mediapipe['color_image'] = color_image
 			shm_mediapipe['depth_image'] = depth_image
