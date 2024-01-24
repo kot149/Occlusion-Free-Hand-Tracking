@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from multiprocessing import Manager
 from collections import deque
 from tkinter import filedialog
-
+from icecream import ic
 
 ###############################################################################
 # Config
@@ -465,6 +465,54 @@ def calc_landmark_presition(mask_img, landmark_coords):
 	result = result / landmarks_count
 	return result
 
+def calc_color_mean(img:np.array, mask:np.array=None):
+	if mask is not None:
+		color_array = img[mask]
+	else:
+		h, w, c = img.shape
+		color_array = img.reshape(w * h, 3)
+
+	color_mean = np.mean(color_array, axis=0)
+	return color_mean
+
+def calc_color_simirarity(a, mask_a:None, b, mask_b:None):
+	if mask_a is None:
+		mask_a = np.ones(a.shape[:2], dtype=bool)
+	if mask_b is None:
+		mask_b = np.ones(b.shape[:2], dtype=bool)
+
+	mask = mask_a & mask_b
+
+	a = a.astype(np.int8)
+	b = b.astype(np.int18)
+
+	diff = a[mask] - b[mask]
+	diff = np.abs(diff)
+	diff = np.mean(diff)
+
+	return diff
+
+def filter_by_color(img, mask:None, color, max_error=40):
+	if mask is None:
+		mask = np.ones(img.shape[:2], dtype=bool)
+
+	img = img.astype(np.int16)
+	color = np.array(color, dtype=np.int16)
+
+	lower = np.max([[0, 0, 0], color-max_error], axis=0)
+	upper = np.min([[255, 255, 255], color+max_error], axis=0)
+	img = img.astype(np.uint8)
+	lower = lower.astype(np.uint8)
+	upper = upper.astype(np.uint8)
+	similar_area = cv2.inRange(img, lower, upper)
+
+	mask = mask & similar_area
+	if mask.any():
+		mask = binaryMorphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8), iterations=1)
+		mask = binaryMorphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), dtype=np.uint8), iterations=1)
+
+	return mask
+
 # hand_bbox_size_adjust_count_max = 10
 def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	with mp_hands.Hands(
@@ -589,6 +637,9 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 
 					mask_hand2, prob, _ = tracker.track(color_image, mask_hand)
 					tracker_initialized = True
+
+					hand_color_mean = calc_color_mean(color_image, mask_hand)
+
 					shm_mediapipe['ready'] = True
 					shm_flags['reset'] = False
 
@@ -602,6 +653,10 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			if tracker_initialized:
 				mask_hand, prob, _ = tracker.track(color_image)
 				mask_hand = binarize(mask_hand, threshold=1)
+
+				mask_hand = filter_by_color(color_image, mask_hand, hand_color_mean)
+
+				hand_color_mean = calc_color_mean(color_image, mask_hand)
 
 			if mask_hand is not None:
 				shm_mediapipe['mask_hand'] = mask_hand
