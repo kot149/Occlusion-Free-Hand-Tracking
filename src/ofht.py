@@ -492,7 +492,7 @@ def calc_color_simirarity(a, mask_a:None, b, mask_b:None):
 
 	return diff
 
-def filter_by_color(img, mask:None, color, max_error=40):
+def filter_by_color(img, mask:None, color, max_error=50):
 	if mask is None:
 		mask = np.ones(img.shape[:2], dtype=bool)
 
