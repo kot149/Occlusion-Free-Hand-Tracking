@@ -161,12 +161,12 @@ if __name__ == '__main__':
 
 	# if fps == None:
 	if True:
-		fps = 24
+		fps = 29
 
 
 	writer = cv2.VideoWriter(
 		os.path.join(input_dir, 'result.mp4'),
-		cv2.VideoWriter_fourcc(*'mp4v'),
+		cv2.VideoWriter_fourcc(*'H264'),
 		fps=fps,
 		frameSize=(640*3, 360*2),
 		isColor=True

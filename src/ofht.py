@@ -28,7 +28,7 @@ input_filepath = r'record'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
-record_in_images = False
+record_in_images = True
 
 device = torch.device("cuda")
 
@@ -638,7 +638,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					mask_hand2, prob, _ = tracker.track(color_image, mask_hand)
 					tracker_initialized = True
 
-					hand_color_mean = calc_color_mean(color_image, mask_hand)
+					# hand_color_mean = calc_color_mean(color_image, mask_hand)
 
 					shm_mediapipe['ready'] = True
 					shm_flags['reset'] = False
@@ -654,9 +654,9 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				mask_hand, prob, _ = tracker.track(color_image)
 				mask_hand = binarize(mask_hand, threshold=1)
 
-				mask_hand = filter_by_color(color_image, mask_hand, hand_color_mean)
+				# mask_hand = filter_by_color(color_image, mask_hand, hand_color_mean)
 
-				hand_color_mean = calc_color_mean(color_image, mask_hand)
+				# hand_color_mean = calc_color_mean(color_image, mask_hand)
 
 			if mask_hand is not None:
 				shm_mediapipe['mask_hand'] = mask_hand
