@@ -40,7 +40,7 @@ class Fps_Counter:
 		return self.fps
 
 def depth_scale(depth_frame: rs.depth_frame):
-	scope_in_meter = (0.5, 1.5) # [meter]
+	scope_in_meter = (0.3, 0.525) # [meter]
 
 	depth_image = np.asanyarray(depth_frame.get_data())
 	dtype = depth_image.dtype

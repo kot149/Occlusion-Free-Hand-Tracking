@@ -23,7 +23,7 @@ w, h = 640, 360
 
 input_fps = 30
 
-input_from_file = False
+input_from_file = True
 input_filepath = r'record'
 
 record_in_video_cv2 = False
@@ -528,6 +528,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 
 		frame_no = 0
 		fps_counter = Fps_Counter()
+		hand_bbox_size_adjust_count_max = 10
 		while not shm_flags['end_flag']:
 			# Wait for a new frame
 			frame_no_prev = frame_no
@@ -609,7 +610,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				hand_center = ((x1 + x2) // 2, (y1 + y2) // 2)
 
 				if (not tracker_initialized) or shm_flags['reset']:
-					half_hand_bbox_size = int((max(x2 - x1, y2 - y1) * 1.3) / 2)
+					half_hand_bbox_size = int((max(x2 - x1, y2 - y1) * 1.8) / 2)
 					x1 = hand_center[0] - half_hand_bbox_size
 					x2 = hand_center[0] + half_hand_bbox_size
 					y1 = hand_center[1] - half_hand_bbox_size
