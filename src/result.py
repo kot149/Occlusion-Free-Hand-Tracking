@@ -8,6 +8,7 @@ import numpy as np
 import os
 import time
 import math
+from tqdm import tqdm
 
 import joblib
 from tkinter import filedialog
@@ -23,13 +24,15 @@ def read_frames_from_images(input_dir: str):
 		count += 1
 		filepath = os.path.join(input_dir, f'{count:0>5}.png')
 
-	frames = joblib.Parallel(n_jobs=-1)(joblib.delayed(cv2.imread)(f) for f in filepath_list)
+	frames = joblib.Parallel(n_jobs=-1)(joblib.delayed(cv2.imread)(f) for f in tqdm(filepath_list))
 
 	return frames, None
 
 
 def read_frames_from_video(video_path: str):
 	cap = cv2.VideoCapture(video_path)
+	num_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+	progress = tqdm(total=num_frames)
 	frames = []
 	while cap.isOpened():
 		success, frame = cap.read()
@@ -37,6 +40,7 @@ def read_frames_from_video(video_path: str):
 			break
 
 		frames.append(frame)
+		progress.update()
 
 	fps = cap.get(cv2.CAP_PROP_FPS)
 
@@ -150,10 +154,13 @@ if __name__ == '__main__':
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
 	if not input_dir:
 		exit(-1)
-	print('Reading frames...')
+	print('Reading original RGB...')
 	frames_rgb, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
+	print('Reading depth...')
 	frames_mask, fps = read_frames_from_images(os.path.join(input_dir, 'mask'))
+	print('Reading inpainted RGB...')
 	frames_inpainted, fps = read_frames_from_video(os.path.join(input_dir, 'rgb_results.mp4'))
+	print('Preprocessing...')
 	frames_mask = [binarize(rgb2gray(m)) for m in frames_mask]
 	frames_rgb_masked = [add_mask(f, m) for f, m in zip(frames_rgb, frames_mask)]
 
@@ -177,8 +184,8 @@ if __name__ == '__main__':
 	cv2.imshow('result', zeros_color)
 	cv2.setWindowProperty('result', cv2.WND_PROP_TOPMOST, 1)
 
-	crop_x1 = 240
-	crop_x2 = 500
+	crop_x1 = 0
+	crop_x2 = 640
 	crop_y1 = 0
 	crop_y2 = 360
 
@@ -199,6 +206,7 @@ if __name__ == '__main__':
 			min_tracking_confidence=min_tracking_confidence,
 			# num_hands=1
 		) as hands2:
+			progress = tqdm(total=len(frames_rgb))
 			for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
 				t = time.time()
 
@@ -235,6 +243,10 @@ if __name__ == '__main__':
 Tracking failure count
     Original video:  {failure_count:4}
     Inpainted video: {failure_count2:4}
+
+Info
+	Num of hands detected: {len(mp_result.multi_hand_landmarks) if mp_result and mp_result.multi_hand_landmarks else 0}
+	Num of hands detected: {len(mp_result2.multi_hand_landmarks) if mp_result and mp_result2.multi_hand_landmarks else 0}
 """
 				row = 30
 				info_image = zeros_color.copy()
@@ -253,8 +265,10 @@ Tracking failure count
 					break
 
 				delay = 1/fps - (time.time() - t)
-				if delay > 0:
-					time.sleep(delay)
+				# if delay > 0:
+				# 	time.sleep(delay)
+
+				progress.update()
 
 	writer.release()
 	cv2.destroyAllWindows()
