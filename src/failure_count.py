@@ -125,23 +125,23 @@ def draw_landmarks(image, multi_hand_landmarks):
 
 	if multi_hand_landmarks:
 		# Draw only one hand
-		# mp_drawing.draw_landmarks(
-		# 	image,
-		# 	multi_hand_landmarks[-1],
-		# 	mp_hands.HAND_CONNECTIONS,
-		# 	mp_drawing_styles.get_default_hand_landmarks_style(),
-		# 	mp_drawing_styles.get_default_hand_connections_style()
-		# )
+		mp_drawing.draw_landmarks(
+			image,
+			multi_hand_landmarks[-1],
+			mp_hands.HAND_CONNECTIONS,
+			mp_drawing_styles.get_default_hand_landmarks_style(),
+			mp_drawing_styles.get_default_hand_connections_style()
+		)
 
 		# Draw multiple hands
-		for hand_landmarks in multi_hand_landmarks:
-			mp_drawing.draw_landmarks(
-				image,
-				hand_landmarks,
-				mp_hands.HAND_CONNECTIONS,
-				mp_drawing_styles.get_default_hand_landmarks_style(),
-				mp_drawing_styles.get_default_hand_connections_style()
-			)
+		# for hand_landmarks in multi_hand_landmarks:
+		# 	mp_drawing.draw_landmarks(
+		# 		image,
+		# 		hand_landmarks,
+		# 		mp_hands.HAND_CONNECTIONS,
+		# 		mp_drawing_styles.get_default_hand_landmarks_style(),
+		# 		mp_drawing_styles.get_default_hand_connections_style()
+		# 	)
 
 	return image
 
@@ -172,7 +172,7 @@ if __name__ == '__main__':
 
 
 	writer = cv2.VideoWriter(
-		os.path.join(input_dir, 'result.mp4'),
+		os.path.join(input_dir, 'failure_count.mp4'),
 		cv2.VideoWriter_fourcc(*'H264'),
 		fps=fps,
 		frameSize=(640*3, 360*2),
@@ -190,22 +190,22 @@ if __name__ == '__main__':
 	crop_y2 = 360
 
 	frame_count = 0
-	failure_count = 0
+	failure_count_orig = 0
 	frame_count2 = 0
-	failure_count2 = 0
+	failure_count_inapinted = 0
 
 	with mp_hands.Hands(
 		model_complexity=model_complexity,
 		min_detection_confidence=min_detection_confidence,
 		min_tracking_confidence=min_tracking_confidence,
 		# num_hands=1
-	) as hands:
+	) as hands_orig:
 		with mp_hands.Hands(
 			model_complexity=model_complexity,
 			min_detection_confidence=min_detection_confidence,
 			min_tracking_confidence=min_tracking_confidence,
 			# num_hands=1
-		) as hands2:
+		) as hands_inpainted:
 			progress = tqdm(total=len(frames_rgb))
 			for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
 				t = time.time()
@@ -213,27 +213,30 @@ if __name__ == '__main__':
 				f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
 				f_inpainted_crop = f_inpainted[crop_y1:crop_y2, crop_x1:crop_x2, :]
 
-				mp_result = hands.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
-				mp_result2 = hands2.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
+				mp_result_orig = hands_orig.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
+				mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
 
 				frame_count += 1
-				if mp_result and mp_result.multi_hand_landmarks:
-					f_with_landmark = draw_landmarks(f_crop, mp_result.multi_hand_landmarks)
+				if mp_result_orig and mp_result_orig.multi_hand_landmarks:
+					print(mp_result_orig.multi_hand_world_landmarks[0])
+					break
+
+					f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
 					_f_with_landmark = f.copy()
 					_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
 					f_with_landmark = _f_with_landmark
 				else:
-					failure_count += 1
+					failure_count_orig += 1
 					f_with_landmark = f
 
 				frame_count2 += 1
-				if mp_result2 and mp_result2.multi_hand_landmarks:
-					f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result2.multi_hand_landmarks)
+				if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
+					f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
 					_f_inpainted_with_landmark = f_inpainted.copy()
 					_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
 					f_inpainted_with_landmark = _f_inpainted_with_landmark
 				else:
-					failure_count2 += 1
+					failure_count_inapinted += 1
 					f_inpainted_with_landmark = f_inpainted
 
 				info_message = f"""Parameters
@@ -241,12 +244,10 @@ if __name__ == '__main__':
     min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-    Original video:  {failure_count:4}
-    Inpainted video: {failure_count2:4}
+    Original video:  {failure_count_orig:4}
+    Inpainted video: {failure_count_inapinted:4}
 
 Info
-	Num of hands detected: {len(mp_result.multi_hand_landmarks) if mp_result and mp_result.multi_hand_landmarks else 0}
-	Num of hands detected: {len(mp_result2.multi_hand_landmarks) if mp_result and mp_result2.multi_hand_landmarks else 0}
 """
 				row = 30
 				info_image = zeros_color.copy()
