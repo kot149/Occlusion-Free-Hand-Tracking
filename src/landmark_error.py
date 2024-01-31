@@ -105,10 +105,11 @@ def bgr2rgb(img: np.ndarray):
 		img = bool2uint8(img)
 	return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-def xstack(imgs : list):
+def xstack(imgs : list, num_cols=None):
 	imgs = [(gray2rgb(img) if img is not None else np.zeros_like(img)) for img in imgs]
 	n = len(imgs)
-	num_cols = math.ceil(math.sqrt(n))
+	if num_cols is None:
+		num_cols = math.ceil(math.sqrt(n))
 	num_rows = math.ceil(n / num_cols)
 
 	for _ in range(num_cols * num_rows - n):
@@ -161,8 +162,8 @@ def get_landmark_coords(image, multi_hand_landmarks):
 	return result
 
 def calc_landmark_coords_error(coords_a, coords_b):
-	coords_a = np.array(coords_a, dtype=np.int8)
-	coords_b = np.array(coords_b, dtype=np.int8)
+	coords_a = np.array(coords_a, dtype=np.int16)
+	coords_b = np.array(coords_b, dtype=np.int16)
 
 	diff = coords_a - coords_b
 	error = np.linalg.norm(diff)
@@ -171,24 +172,25 @@ def calc_landmark_coords_error(coords_a, coords_b):
 
 if __name__ == '__main__':
 	model_complexity = 0
-	min_detection_confidence = 0.1
-	min_tracking_confidence = 0.8
+	min_detection_confidence = 0.5
+	min_tracking_confidence = 0.5
 
 	input_dir = r'output'
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
 	if not input_dir:
 		exit(-1)
 
-	input_filename = os.path.split(input_dir)[1]
+	print(f'input: {input_dir}')
+	num_frames = len(os.listdir(os.path.join(input_dir, 'rgb')))
+	print(f'{num_frames} frames')
 
-	print('Reading no-pole frames...')
+	print('Reading frames...')
 	frames_no_pole, fps = read_frames_from_images(os.path.join(input_dir, 'rgb_no_pole'))
-	print('Reading with-pole RGB...')
 	frames_pole, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
-	print('Reading depth...')
 	frames_mask, fps = read_frames_from_images(os.path.join(input_dir, 'mask'))
-	print('Reading inpainted RGB...')
 	frames_inpainted, fps = read_frames_from_video(os.path.join(input_dir, 'rgb_inpainted.mp4'))
+
+	assert len(frames_no_pole) == num_frames and len(frames_pole) == num_frames and len(frames_mask) == num_frames and len(frames_inpainted) == num_frames
 
 	print('Preprocessing...')
 	frames_mask = [binarize(rgb2gray(m)) for m in frames_mask]
@@ -205,7 +207,7 @@ if __name__ == '__main__':
 		os.path.join(input_dir, 'lm_error.mp4'),
 		cv2.VideoWriter_fourcc(*'H264'),
 		fps=fps,
-		frameSize=(640*3, 360*2),
+		frameSize=(640*4, 360*2),
 		isColor=True
 	)
 
@@ -239,6 +241,7 @@ if __name__ == '__main__':
 
 		frame_count = 0
 		failure_counts = [0, 0, 0]
+		landmark_coords_errors = [[], []]
 
 		for f_no_pole, f_pole, f_masked, f_inpainted in zip(frames_no_pole, frames_pole, frames_pole_masked, frames_inpainted):
 			t = time.time()
@@ -270,17 +273,26 @@ if __name__ == '__main__':
 
 				frames_with_landmark.append(f_with_landmark)
 
+			coords_no_pole = landmark_coords[0]
+			if coords_no_pole is not None:
+				for i, coords in zip(range(2), landmark_coords[1:]):
+					if coords is None:
+						continue
+					error = calc_landmark_coords_error(coords, coords_no_pole)
+					landmark_coords_errors[i].append(error)
 
 
 			info_message = f"""Parameters
-    min_detection_confidence: {min_detection_confidence}
-    min_tracking_confidence: {min_tracking_confidence}
+  min_detection_confidence: {min_detection_confidence}
+  min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-    video with no pole:  {failure_counts[0]:4}
-    video with pole:  {failure_counts[1]:4}
-    Inpainted video: {failure_counts[2]:4}
+  Original:  {failure_counts[1]:> 6}
+  Inpainted: {failure_counts[2]:> 6}
 
+Landmark coords error
+  Original:  {f'{landmark_coords_errors[0][-1]:> 6.2f}' if landmark_coords[1] is not None else f'{"N/A":>6}'} ave {np.mean(landmark_coords_errors[0]):> 6.2f}
+  Inpainted: {f'{landmark_coords_errors[1][-1]:> 6.2f}' if landmark_coords[2] is not None else f'{"N/A":>6}'} ave {np.mean(landmark_coords_errors[1]):> 6.2f}
 """
 			row = 30
 			info_image = zeros_color.copy()
@@ -293,7 +305,7 @@ Tracking failure count
 			result = xstack([
 				f_no_pole, f_pole, f_masked, f_inpainted,
 				*frames_with_landmark, info_image
-			])
+			], num_cols=4)
 			writer.write(result)
 			cv2.imshow('result', result)
 
@@ -306,6 +318,9 @@ Tracking failure count
 			# 	time.sleep(delay)
 
 			progress.update()
+
+	np.savetxt(os.path.join(input_dir, 'lm_error_orig.csv'), landmark_coords_errors[0])
+	np.savetxt(os.path.join(input_dir, 'lm_error_inpainted.csv'), landmark_coords_errors[1])
 
 	writer.release()
 	cv2.destroyAllWindows()
