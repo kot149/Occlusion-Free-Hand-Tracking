@@ -795,7 +795,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['fps'] = 0
 		# shared_fps['start_time'] = time.time()
 
-		max_workers = 3
+		max_workers = 7
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
@@ -1583,7 +1583,7 @@ if __name__ == "__main__" :
 					, color_image_with_mask
 					, info_image
 					# , test
-					# , color_image2
+					# , color_image_with_landmarks
 				])
 
 				if frame_no > frame_no_prev:
