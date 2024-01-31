@@ -159,7 +159,7 @@ if __name__ == '__main__':
 	print('Reading depth...')
 	frames_mask, fps = read_frames_from_images(os.path.join(input_dir, 'mask'))
 	print('Reading inpainted RGB...')
-	frames_inpainted, fps = read_frames_from_video(os.path.join(input_dir, 'rgb_results.mp4'))
+	frames_inpainted, fps = read_frames_from_video(os.path.join(input_dir, 'rgb_inpainted.mp4'))
 	print('Preprocessing...')
 	frames_mask = [binarize(rgb2gray(m)) for m in frames_mask]
 	frames_rgb_masked = [add_mask(f, m) for f, m in zip(frames_rgb, frames_mask)]
@@ -199,47 +199,43 @@ if __name__ == '__main__':
 		min_detection_confidence=min_detection_confidence,
 		min_tracking_confidence=min_tracking_confidence,
 		# num_hands=1
-	) as hands_orig:
-		with mp_hands.Hands(
-			model_complexity=model_complexity,
-			min_detection_confidence=min_detection_confidence,
-			min_tracking_confidence=min_tracking_confidence,
-			# num_hands=1
-		) as hands_inpainted:
-			progress = tqdm(total=len(frames_rgb))
-			for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
-				t = time.time()
+	) as hands_orig, mp_hands.Hands(
+		model_complexity=model_complexity,
+		min_detection_confidence=min_detection_confidence,
+		min_tracking_confidence=min_tracking_confidence,
+		# num_hands=1
+	) as hands_inpainted:
+		progress = tqdm(total=len(frames_rgb))
+		for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
+			t = time.time()
 
-				f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
-				f_inpainted_crop = f_inpainted[crop_y1:crop_y2, crop_x1:crop_x2, :]
+			f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
+			f_inpainted_crop = f_inpainted[crop_y1:crop_y2, crop_x1:crop_x2, :]
 
-				mp_result_orig = hands_orig.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
-				mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
+			mp_result_orig = hands_orig.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
+			mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
 
-				frame_count += 1
-				if mp_result_orig and mp_result_orig.multi_hand_landmarks:
-					print(mp_result_orig.multi_hand_world_landmarks[0])
-					break
+			frame_count += 1
+			if mp_result_orig and mp_result_orig.multi_hand_landmarks:
+				f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
+				_f_with_landmark = f.copy()
+				_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
+				f_with_landmark = _f_with_landmark
+			else:
+				failure_count_orig += 1
+				f_with_landmark = f
 
-					f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
-					_f_with_landmark = f.copy()
-					_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
-					f_with_landmark = _f_with_landmark
-				else:
-					failure_count_orig += 1
-					f_with_landmark = f
+			frame_count2 += 1
+			if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
+				f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
+				_f_inpainted_with_landmark = f_inpainted.copy()
+				_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
+				f_inpainted_with_landmark = _f_inpainted_with_landmark
+			else:
+				failure_count_inapinted += 1
+				f_inpainted_with_landmark = f_inpainted
 
-				frame_count2 += 1
-				if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
-					f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
-					_f_inpainted_with_landmark = f_inpainted.copy()
-					_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
-					f_inpainted_with_landmark = _f_inpainted_with_landmark
-				else:
-					failure_count_inapinted += 1
-					f_inpainted_with_landmark = f_inpainted
-
-				info_message = f"""Parameters
+			info_message = f"""Parameters
     min_detection_confidence: {min_detection_confidence}
     min_tracking_confidence: {min_tracking_confidence}
 
@@ -249,27 +245,27 @@ Tracking failure count
 
 Info
 """
-				row = 30
-				info_image = zeros_color.copy()
+			row = 30
+			info_image = zeros_color.copy()
 
-				for line in info_message.split('\n'):
-					cv2.putText(info_image, line, (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
-					row += 30
+			for line in info_message.split('\n'):
+				cv2.putText(info_image, line, (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+				row += 30
 
 
-				result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
-				writer.write(result)
-				cv2.imshow('result', result)
+			result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
+			writer.write(result)
+			cv2.imshow('result', result)
 
-				key = cv2.waitKey(1)
-				if key == 27:
-					break
+			key = cv2.waitKey(1)
+			if key == 27:
+				break
 
-				delay = 1/fps - (time.time() - t)
-				# if delay > 0:
-				# 	time.sleep(delay)
+			delay = 1/fps - (time.time() - t)
+			# if delay > 0:
+			# 	time.sleep(delay)
 
-				progress.update()
+			progress.update()
 
 	writer.release()
 	cv2.destroyAllWindows()
