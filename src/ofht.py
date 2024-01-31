@@ -34,7 +34,6 @@ record_in_images = True
 
 device = torch.device("cuda")
 
-save_no_pole_frame = False
 if input_from_file and __name__ == '__main__':
 	input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
 	if not input_filepath:
@@ -43,6 +42,8 @@ if input_from_file and __name__ == '__main__':
 	if input_filepath.endswith('_p.mp4'):
 		save_no_pole_frame = True
 		no_pole_path = input_filepath.replace('_p.mp4', '.mp4')
+	else:
+		save_no_pole_frame = False
 
 input_seconds_per_frame = 1 / input_fps
 
@@ -351,7 +352,7 @@ def depth_scale(depth_frame: rs.depth_frame):
 def rgbd_streaming_task(shm_rgbd, shm_flags):
 	if input_from_file:
 
-		if save_no_pole_frame:
+		if shm_flags['save_no_pole_frame']:
 			color_images_no_pole, fps = read_frames_from_video(no_pole_path)
 			color_images_no_pole = [f[:, 0:w, :] for f in color_images_no_pole]
 			color_images_no_pole = iter(color_images_no_pole)
@@ -386,9 +387,9 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 				shm_rgbd['color_image'] = color_image
 				shm_rgbd['depth_image'] = depth_image
 				shm_rgbd['depth_valid_area'] = depth_valid_area
-				shm_rgbd['frame_no'] += 1
-				if save_no_pole_frame:
+				if shm_flags['save_no_pole_frame']:
 					shm_rgbd['color_image_no_pole'] = next(color_images_no_pole)
+				shm_rgbd['frame_no'] += 1
 
 				shm_rgbd['fps'] = fps_counter.count()
 
@@ -588,6 +589,8 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			color_image = shm_rgbd['color_image']
 			depth_image = shm_rgbd['depth_image']
 			depth_valid_area = shm_rgbd['depth_valid_area']
+			if save_no_pole_frame:
+				color_image_no_pole = shm_rgbd['color_image_no_pole']
 
 			mp_result = hands.process(bgr2rgb(color_image))
 
@@ -715,6 +718,8 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			shm_mediapipe['depth_image'] = depth_image
 			shm_mediapipe['depth_valid_area'] = depth_valid_area
 			shm_mediapipe['frame_no'] = frame_no
+			if shm_flags['save_no_pole_frame']:
+				shm_mediapipe['color_image_no_pole'] = color_image_no_pole
 
 			shm_mediapipe['fps'] = fps_counter.count()
 
@@ -896,6 +901,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	color_image = shm_mediapipe['color_image']
 	depth_image = shm_mediapipe['depth_image']
 	frame_no = shm_mediapipe['frame_no']
+	if shm_flags['save_no_pole_frame']:
+		color_image_no_pole = shm_mediapipe['color_image_no_pole']
 
 	hand_bbox_size = shm_mediapipe['hand_bbox_size']
 	depth_valid_area = shm_mediapipe['depth_valid_area']
@@ -1361,6 +1368,9 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['depth_valid_area'] = depth_valid_area
 	shm_sa['frame_no'] = frame_no
 
+	if shm_flags['save_no_pole_frame']:
+		shm_sa['color_image_no_pole'] = color_image_no_pole
+
 	shm_sa['error_message'] = error_message
 
 
@@ -1382,6 +1392,7 @@ if __name__ == "__main__" :
 			shm_flags['rgbd_streaming_task_closed'] = False
 			shm_flags['mediapipe_task_closed'] = False
 			shm_flags['fastsam_task_closed'] = False
+			shm_flags['save_no_pole_frame'] = save_no_pole_frame
 			shm_flags['reset'] = False
 
 			# RGBD Streaming
@@ -1405,12 +1416,14 @@ if __name__ == "__main__" :
 			shm_mediapipe['color_image'] = zeros_color
 			shm_mediapipe['depth_image'] = zeros_gray
 			shm_mediapipe['depth_valid_area'] = zeros_bool
+			shm_mediapipe['color_image_no_pole'] = zeros_color
 			shm_mediapipe['color_image_with_landmarks'] = zeros_color
 			shm_mediapipe['frame_no'] = 0
 			shm_mediapipe['fps'] = 0
 
 			# Segment Anything
 			shm_sa = manager.dict()
+			shm_sa['color_image_no_pole'] = zeros_color
 			shm_sa['color_image'] = zeros_color
 			shm_sa['depth_image'] = zeros_gray
 			shm_sa['depth_valid_area'] = zeros_bool
@@ -1575,7 +1588,7 @@ if __name__ == "__main__" :
 
 				if frame_no > frame_no_prev:
 					if save_no_pole_frame:
-						write(color_image3, mask_occluder, shm_rgbd['color_image_no_pole'])
+						write(color_image3, mask_occluder, shm_sa['color_image_no_pole'])
 					else:
 						write(color_image3, mask_occluder)
 

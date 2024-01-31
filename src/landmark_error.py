@@ -180,11 +180,9 @@ if __name__ == '__main__':
 		exit(-1)
 
 	input_filename = os.path.split(input_dir)[1]
-	record_dir = r'record'
-	record_filename = os.path.join(record_dir, input_filename + '.mp4')
 
 	print('Reading no-pole frames...')
-	frames_no_pole, fps = read_frames_from_video(record_filename)
+	frames_no_pole, fps = read_frames_from_images(os.path.join(input_dir, 'rgb_no_pole'))
 	print('Reading with-pole RGB...')
 	frames_pole, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
 	print('Reading depth...')
@@ -193,7 +191,6 @@ if __name__ == '__main__':
 	frames_inpainted, fps = read_frames_from_video(os.path.join(input_dir, 'rgb_inpainted.mp4'))
 
 	print('Preprocessing...')
-	frames_no_pole = [f[:, 0:w, :] for f in frames_no_pole]
 	frames_mask = [binarize(rgb2gray(m)) for m in frames_mask]
 	frames_pole_masked = [add_mask(f, m) for f, m in zip(frames_pole, frames_mask)]
 
