@@ -589,7 +589,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			color_image = shm_rgbd['color_image']
 			depth_image = shm_rgbd['depth_image']
 			depth_valid_area = shm_rgbd['depth_valid_area']
-			if save_no_pole_frame:
+			if shm_flags['save_no_pole_frame']:
 				color_image_no_pole = shm_rgbd['color_image_no_pole']
 
 			mp_result = hands.process(bgr2rgb(color_image))
