@@ -147,8 +147,8 @@ def draw_landmarks(image, multi_hand_landmarks):
 
 if __name__ == '__main__':
 	model_complexity = 0
-	min_detection_confidence = 0.1
-	min_tracking_confidence = 0.8
+	min_detection_confidence = 0.5
+	min_tracking_confidence = 0.5
 
 	input_dir = r'output'
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
