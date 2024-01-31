@@ -12,6 +12,8 @@ from multiprocessing import Manager
 from collections import deque
 from tkinter import filedialog
 from icecream import ic
+from tqdm import tqdm
+import joblib
 
 ###############################################################################
 # Config
@@ -32,11 +34,16 @@ record_in_images = True
 
 device = torch.device("cuda")
 
+save_no_pole_frame = False
 if input_from_file and __name__ == '__main__':
 	input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
 	if not input_filepath:
 		exit(-1)
 	print("Input file: ", input_filepath)
+	if input_filepath.endswith('_p.mp4'):
+		save_no_pole_frame = True
+		no_pole_path = input_filepath.replace('_p.mp4', '.mp4')
+
 input_seconds_per_frame = 1 / input_fps
 
 ###############################################################################
@@ -83,6 +90,39 @@ def argmax(_list):
 
 def init_process():
 	pass
+
+def read_frames_from_images(input_dir: str):
+	count = 1
+	filepath_list = []
+	filepath = os.path.join(input_dir, f'{count:0>5}.png')
+
+	while os.path.exists(filepath):
+		filepath_list.append(filepath)
+
+		count += 1
+		filepath = os.path.join(input_dir, f'{count:0>5}.png')
+
+	frames = joblib.Parallel(n_jobs=-1)(joblib.delayed(cv2.imread)(f) for f in tqdm(filepath_list))
+
+	return frames, None
+
+
+def read_frames_from_video(video_path: str):
+	cap = cv2.VideoCapture(video_path)
+	num_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+	progress = tqdm(total=num_frames)
+	frames = []
+	while cap.isOpened():
+		success, frame = cap.read()
+		if not success:
+			break
+
+		frames.append(frame)
+		progress.update()
+
+	fps = cap.get(cv2.CAP_PROP_FPS)
+
+	return frames, fps
 
 ###############################################################################
 # Image Processing
@@ -310,8 +350,13 @@ def depth_scale(depth_frame: rs.depth_frame):
 
 def rgbd_streaming_task(shm_rgbd, shm_flags):
 	if input_from_file:
-		cap = cv2.VideoCapture(input_filepath)
 
+		if save_no_pole_frame:
+			color_images_no_pole, fps = read_frames_from_video(no_pole_path)
+			color_images_no_pole = [f[:, 0:w, :] for f in color_images_no_pole]
+			color_images_no_pole = iter(color_images_no_pole)
+
+		cap = cv2.VideoCapture(input_filepath)
 		if cap.isOpened():
 			w_v = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) // 3)
 			h_v = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -342,6 +387,8 @@ def rgbd_streaming_task(shm_rgbd, shm_flags):
 				shm_rgbd['depth_image'] = depth_image
 				shm_rgbd['depth_valid_area'] = depth_valid_area
 				shm_rgbd['frame_no'] += 1
+				if save_no_pole_frame:
+					shm_rgbd['color_image_no_pole'] = next(color_images_no_pole)
 
 				shm_rgbd['fps'] = fps_counter.count()
 
@@ -1340,6 +1387,7 @@ if __name__ == "__main__" :
 			# RGBD Streaming
 			shm_rgbd = manager.dict()
 			shm_rgbd['color_image'] = zeros_color
+			shm_rgbd['color_image_no_pole'] = zeros_color
 			shm_rgbd['depth_image'] = zeros_gray
 			shm_rgbd['depth_valid_area'] = None
 			shm_rgbd['frame_no'] = 0
@@ -1437,14 +1485,20 @@ if __name__ == "__main__" :
 				output_dir_mask = os.path.join(output_dir, 'mask')
 				os.makedirs(output_dir_rgb, exist_ok=True)
 				os.makedirs(output_dir_mask, exist_ok=True)
+				if save_no_pole_frame:
+					output_dir_no_pole = os.path.join(output_dir, 'rgb_no_pole')
+					os.makedirs(output_dir_no_pole, exist_ok=True)
 
-				def write(color_image, mask_image):
+				def write(color_image, mask_image, color_image_no_pole=None):
 					write.n += 1
 					filename = f'{write.n:0>5}.png'
 					output_filename_rgb = os.path.join(output_dir_rgb, filename)
 					output_filename_mask = os.path.join(output_dir_mask, filename)
 					cv2.imwrite(output_filename_rgb, color_image)
 					cv2.imwrite(output_filename_mask, bool2uint8(mask_image))
+					if save_no_pole_frame:
+						output_filename_no_pole = os.path.join(output_dir_no_pole, filename)
+						cv2.imwrite(output_filename_no_pole, color_image_no_pole)
 				write.n = 0
 
 				def close_writer():
@@ -1520,7 +1574,10 @@ if __name__ == "__main__" :
 				])
 
 				if frame_no > frame_no_prev:
-					write(color_image3, mask_occluder)
+					if save_no_pole_frame:
+						write(color_image3, mask_occluder, shm_rgbd['color_image_no_pole'])
+					else:
+						write(color_image3, mask_occluder)
 
 				cv2.imshow("", image)
 
