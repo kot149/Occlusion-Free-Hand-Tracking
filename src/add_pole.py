@@ -4,6 +4,7 @@ import cv2
 import joblib
 from tkinter import filedialog
 import os
+from tqdm import tqdm
 
 w, h = 640, 360
 
@@ -100,6 +101,7 @@ if __name__ == '__main__':
 
 	cap = cv2.VideoCapture(input_filepath)
 	fps = cap.get(cv2.CAP_PROP_FPS)
+	num_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
 	writer = cv2.VideoWriter(
 		output_filepath,
@@ -108,6 +110,8 @@ if __name__ == '__main__':
 		frameSize=(w*3, h),
 		isColor=True
 	)
+
+	progress = tqdm(total=num_frames)
 
 	while True:
 		ret, frame = cap.read()
@@ -129,6 +133,8 @@ if __name__ == '__main__':
 		# cv2.imshow("", frame_with_pole)
 		# if cv2.waitKey(5) == 27:
 		# 	break
+
+		progress.update()
 
 	cap.release()
 	writer.release()
