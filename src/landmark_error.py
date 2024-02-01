@@ -240,7 +240,9 @@ if __name__ == '__main__':
 		progress = tqdm(total=len(frames_pole))
 
 		frame_count = 0
-		failure_counts = [0, 0, 0]
+		failure_counts = [0]*3
+		failure = [False]*3
+		failure_counts_exc = [0]*3
 		landmark_coords_errors = [[], []]
 
 		frames_with_landmark = [None]*3
@@ -260,7 +262,7 @@ if __name__ == '__main__':
 				landmark_coords[i] = coords
 			else:
 				if frame_count != 1:
-					failure_counts[i] += 1
+					failure[i] = True
 				f_with_landmark = f
 				landmark_coords[i] = None
 
@@ -271,6 +273,7 @@ if __name__ == '__main__':
 
 			frame_count += 1
 			frames_with_landmark = [None]*3
+			failure = [False]*3
 			landmark_coords = [None]*3
 
 			joblib.Parallel(n_jobs=-1, prefer='threads')(joblib.delayed(task)(i, hands, f) for i, hands, f in zip(
@@ -278,6 +281,15 @@ if __name__ == '__main__':
 				[hands_no_pole, hands_pole, hands_inpainted],
 				[f_no_pole, f_pole, f_inpainted]
 			))
+
+			for i in range(3):
+				if failure[i]:
+					failure_counts[i] += 1
+
+			if failure[1] and not failure[2]:
+				failure_counts_exc[1] += 1
+			if failure[2] and not failure[1]:
+				failure_counts_exc[2] += 1
 
 			coords_no_pole = landmark_coords[0]
 			if coords_no_pole is not None:
@@ -293,8 +305,8 @@ if __name__ == '__main__':
   min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-  Original:  {failure_counts[1]:> 6}
-  Inpainted: {failure_counts[2]:> 6}
+  Original:  {failure_counts[1]:> 4} [{failure_counts_exc[1]}]
+  Inpainted: {failure_counts[2]:> 4} [{failure_counts_exc[2]}]
 
 Landmark coords error
   Original:  {f'{landmark_coords_errors[0][-1]:> 6.2f}' if landmark_coords[1] is not None else f'{"N/A":>6}'} ave {np.mean(landmark_coords_errors[0]):> 6.2f}
