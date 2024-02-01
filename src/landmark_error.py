@@ -325,6 +325,8 @@ Landmark coords error
 
 			progress.update()
 
+	landmark_coords_errors[0].append(np.mean(landmark_coords_errors[0]))
+	landmark_coords_errors[1].append(np.mean(landmark_coords_errors[1]))
 	np.savetxt(os.path.join(input_dir, 'lm_error_orig.csv'), landmark_coords_errors[0])
 	np.savetxt(os.path.join(input_dir, 'lm_error_inpainted.csv'), landmark_coords_errors[1])
 
