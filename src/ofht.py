@@ -574,6 +574,8 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 		hand_center = shm_mediapipe['hand_center']
 		tracker_initialized = False
 
+		save_no_pole_frame = shm_flags['save_no_pole_frame']
+
 		frame_no = 0
 		fps_counter = Fps_Counter()
 		hand_bbox_size_adjust_count_max = 10
@@ -589,77 +591,80 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			color_image = shm_rgbd['color_image']
 			depth_image = shm_rgbd['depth_image']
 			depth_valid_area = shm_rgbd['depth_valid_area']
-			if shm_flags['save_no_pole_frame']:
+			if save_no_pole_frame:
 				color_image_no_pole = shm_rgbd['color_image_no_pole']
+			frame_no = shm_rgbd['frame_no']
 
-			mp_result = hands.process(bgr2rgb(color_image))
+			if (not tracker_initialized) or shm_flags['reset']:
 
-			# When MediaPipe succeeded
-			if mp_result and mp_result.multi_hand_landmarks:
-				landmark_coords = get_landmark_coords(color_image, mp_result.multi_hand_landmarks)
-				shm_mediapipe['coords'] = landmark_coords
-				landmark_coords = np.array(landmark_coords)
+				mp_result = hands.process(bgr2rgb(color_image))
 
-				"""
-				hand_bbox_size_adjust_count = shm_mediapipe['hand_bbox_size_adjust_count']
-				if hand_bbox_size_adjust_count < hand_bbox_size_adjust_count_max:
+				# When MediaPipe succeeded
+				if mp_result and mp_result.multi_hand_landmarks:
+					landmark_coords = get_landmark_coords(color_image, mp_result.multi_hand_landmarks)
+					shm_mediapipe['coords'] = landmark_coords
+					landmark_coords = np.array(landmark_coords)
 
-					# Check if all coords are valid
-					coords = landmark_coords[[0, 1, 5, 9, 13, 17]]
-					for _coord in coords:
-						if not depth_valid_area[_coord[1], _coord[0]]:
-							break
+					"""
+					hand_bbox_size_adjust_count = shm_mediapipe['hand_bbox_size_adjust_count']
+					if hand_bbox_size_adjust_count < hand_bbox_size_adjust_count_max:
 
-					else: # All coords are valid
-						coords = coords / np.arctan(coords / depth_image[coords[0, 1], coords[0, 0]])
+						# Check if all coords are valid
+						coords = landmark_coords[[0, 1, 5, 9, 13, 17]]
+						for _coord in coords:
+							if not depth_valid_area[_coord[1], _coord[0]]:
+								break
 
-						# mean = np.mean(coords, axis=0)
-						std = np.std(coords, axis=0, ddof=1)
-						hand_bbox_size = np.mean(std) * 13
+						else: # All coords are valid
+							coords = coords / np.arctan(coords / depth_image[coords[0, 1], coords[0, 0]])
 
-						shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] + hand_bbox_size
+							# mean = np.mean(coords, axis=0)
+							std = np.std(coords, axis=0, ddof=1)
+							hand_bbox_size = np.mean(std) * 13
 
-						hand_bbox_size_adjust_count += 1
-						shm_mediapipe['hand_bbox_size_adjust_count'] = hand_bbox_size_adjust_count
+							shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] + hand_bbox_size
 
-						if hand_bbox_size_adjust_count == hand_bbox_size_adjust_count_max:
-							shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] / hand_bbox_size_adjust_count_max
+							hand_bbox_size_adjust_count += 1
+							shm_mediapipe['hand_bbox_size_adjust_count'] = hand_bbox_size_adjust_count
 
-							shm_mediapipe['ready'] = True
-				"""
+							if hand_bbox_size_adjust_count == hand_bbox_size_adjust_count_max:
+								shm_mediapipe['hand_bbox_size'] = shm_mediapipe['hand_bbox_size'] / hand_bbox_size_adjust_count_max
+
+								shm_mediapipe['ready'] = True
+					"""
 
 
 
-				# if mp_result.palm_detections:
-				# 	rbb = mp_result.palm_detections[-1].location_data.relative_bounding_box
-				# 	x1, y1, x2, y2 = rbb.xmin, rbb.ymin, rbb.width, rbb.height
-				# 	x2, y2 = x1+x2, y1+y2
-				# 	x1 = int(x1 * w)
-				# 	x2 = int(x2 * w)
-				# 	y1 = int(y1 * h)
-				# 	y2 = int(y2 * h)
-				# else:
-				x1 = np.min(landmark_coords[:, 0])
-				y1 = np.min(landmark_coords[:, 1])
-				x2 = np.max(landmark_coords[:, 0])
-				y2 = np.max(landmark_coords[:, 1])
+					# if mp_result.palm_detections:
+					# 	rbb = mp_result.palm_detections[-1].location_data.relative_bounding_box
+					# 	x1, y1, x2, y2 = rbb.xmin, rbb.ymin, rbb.width, rbb.height
+					# 	x2, y2 = x1+x2, y1+y2
+					# 	x1 = int(x1 * w)
+					# 	x2 = int(x2 * w)
+					# 	y1 = int(y1 * h)
+					# 	y2 = int(y2 * h)
+					# else:
+					x1 = np.min(landmark_coords[:, 0])
+					y1 = np.min(landmark_coords[:, 1])
+					x2 = np.max(landmark_coords[:, 0])
+					y2 = np.max(landmark_coords[:, 1])
 
-				# crop_margin = 0.25
-				# margin_x = int((x2 - x1) * crop_margin)
-				# margin_y = int((y2 - y1) * crop_margin)
-				# x1 -= margin_x
-				# x2 += margin_x
-				# y1 -= margin_y
-				# y2 += margin_y
+					# crop_margin = 0.25
+					# margin_x = int((x2 - x1) * crop_margin)
+					# margin_y = int((y2 - y1) * crop_margin)
+					# x1 -= margin_x
+					# x2 += margin_x
+					# y1 -= margin_y
+					# y2 += margin_y
 
-				x1 = max(x1, 0)
-				y1 = max(y1, 0)
-				x2 = min(x2, w-1)
-				y2 = min(y2, h-1)
+					x1 = max(x1, 0)
+					y1 = max(y1, 0)
+					x2 = min(x2, w-1)
+					y2 = min(y2, h-1)
 
-				hand_center = ((x1 + x2) // 2, (y1 + y2) // 2)
+					hand_center = ((x1 + x2) // 2, (y1 + y2) // 2)
 
-				if (not tracker_initialized) or shm_flags['reset']:
+				# if (not tracker_initialized) or shm_flags['reset']:
 					half_hand_bbox_size = int((max(x2 - x1, y2 - y1) * 1.8) / 2)
 					x1 = hand_center[0] - half_hand_bbox_size
 					x2 = hand_center[0] + half_hand_bbox_size
@@ -717,9 +722,9 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 			shm_mediapipe['color_image'] = color_image
 			shm_mediapipe['depth_image'] = depth_image
 			shm_mediapipe['depth_valid_area'] = depth_valid_area
-			shm_mediapipe['frame_no'] = frame_no
-			if shm_flags['save_no_pole_frame']:
+			if save_no_pole_frame:
 				shm_mediapipe['color_image_no_pole'] = color_image_no_pole
+			shm_mediapipe['frame_no'] = frame_no
 
 			shm_mediapipe['fps'] = fps_counter.count()
 
@@ -897,12 +902,13 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		return
 
 	reset_flag = shm_flags['reset']
+	save_no_pole_frame = shm_flags['save_no_pole_frame']
 
 	color_image = shm_mediapipe['color_image']
 	depth_image = shm_mediapipe['depth_image']
-	frame_no = shm_mediapipe['frame_no']
-	if shm_flags['save_no_pole_frame']:
+	if save_no_pole_frame:
 		color_image_no_pole = shm_mediapipe['color_image_no_pole']
+	frame_no = shm_mediapipe['frame_no']
 
 	hand_bbox_size = shm_mediapipe['hand_bbox_size']
 	depth_valid_area = shm_mediapipe['depth_valid_area']
@@ -1366,10 +1372,10 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	shm_sa['color_image'] = color_image
 	shm_sa['depth_image'] = depth_image
 	shm_sa['depth_valid_area'] = depth_valid_area
+	if save_no_pole_frame:
+		shm_sa['color_image_no_pole'] = color_image_no_pole
 	shm_sa['frame_no'] = frame_no
 
-	if shm_flags['save_no_pole_frame']:
-		shm_sa['color_image_no_pole'] = color_image_no_pole
 
 	shm_sa['error_message'] = error_message
 
@@ -1544,6 +1550,8 @@ if __name__ == "__main__" :
 				# color_image2 = add_mask(color_image2, mask_hand)
 
 				color_image3 = shm_sa['color_image']
+				if save_no_pole_frame:
+					color_image_no_pole = shm_sa['color_image_no_pole']
 				color_image_with_mask = shm_sa['color_image_with_mask']
 				masked_hand_image = shm_sa['color_image_with_mask_hand']
 				mask_occluder = shm_sa['mask_occluder']
@@ -1588,7 +1596,7 @@ if __name__ == "__main__" :
 
 				if frame_no > frame_no_prev:
 					if save_no_pole_frame:
-						write(color_image3, mask_occluder, shm_sa['color_image_no_pole'])
+						write(color_image3, mask_occluder, color_image_no_pole)
 					else:
 						write(color_image3, mask_occluder)
 
