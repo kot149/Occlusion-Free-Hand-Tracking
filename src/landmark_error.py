@@ -243,35 +243,41 @@ if __name__ == '__main__':
 		failure_counts = [0, 0, 0]
 		landmark_coords_errors = [[], []]
 
+		frames_with_landmark = [None]*3
+		landmark_coords = [None]*3
+
+		def task(i, hands, f):
+			f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
+			mp_result = hands.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
+
+			if mp_result and mp_result.multi_hand_landmarks:
+				f_with_landmark = draw_landmarks(f_crop, mp_result.multi_hand_landmarks)
+				_f_with_landmark = f.copy()
+				_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
+				f_with_landmark = _f_with_landmark
+
+				coords = get_landmark_coords(f_crop, mp_result.multi_hand_landmarks)
+				landmark_coords[i] = coords
+			else:
+				if frame_count != 1:
+					failure_counts[i] += 1
+				f_with_landmark = f
+				landmark_coords[i] = None
+
+			frames_with_landmark[i] = f_with_landmark
+
 		for f_no_pole, f_pole, f_masked, f_inpainted in zip(frames_no_pole, frames_pole, frames_pole_masked, frames_inpainted):
 			t = time.time()
 
 			frame_count += 1
-			frames_with_landmark = []
-			landmark_coords = []
-			for i, hands, f in zip(
+			frames_with_landmark = [None]*3
+			landmark_coords = [None]*3
+
+			joblib.Parallel(n_jobs=-1, prefer='threads')(joblib.delayed(task)(i, hands, f) for i, hands, f in zip(
 				range(3),
 				[hands_no_pole, hands_pole, hands_inpainted],
 				[f_no_pole, f_pole, f_inpainted]
-			):
-				f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
-				mp_result = hands.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
-
-				if mp_result and mp_result.multi_hand_landmarks:
-					f_with_landmark = draw_landmarks(f_crop, mp_result.multi_hand_landmarks)
-					_f_with_landmark = f.copy()
-					_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
-					f_with_landmark = _f_with_landmark
-
-					coords = get_landmark_coords(f_crop, mp_result.multi_hand_landmarks)
-					landmark_coords.append(coords)
-				else:
-					if frame_count != 1:
-						failure_counts[i] += 1
-					f_with_landmark = f
-					landmark_coords.append(None)
-
-				frames_with_landmark.append(f_with_landmark)
+			))
 
 			coords_no_pole = landmark_coords[0]
 			if coords_no_pole is not None:
