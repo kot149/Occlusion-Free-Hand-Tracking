@@ -154,6 +154,9 @@ if __name__ == '__main__':
 	input_dir = filedialog.askdirectory(initialdir = input_dir)
 	if not input_dir:
 		exit(-1)
+
+	print('input:', input_dir)
+
 	print('Reading original RGB...')
 	frames_rgb, fps = read_frames_from_images(os.path.join(input_dir, 'rgb'))
 	print('Reading depth...')
@@ -170,9 +173,10 @@ if __name__ == '__main__':
 	if True:
 		fps = 29
 
+	output_path = os.path.join(input_dir, 'failure_count.mp4')
 
 	writer = cv2.VideoWriter(
-		os.path.join(input_dir, 'failure_count.mp4'),
+		output_path,
 		cv2.VideoWriter_fourcc(*'H264'),
 		fps=fps,
 		frameSize=(640*3, 360*2),
@@ -191,8 +195,11 @@ if __name__ == '__main__':
 
 	frame_count = 0
 	failure_count_orig = 0
-	frame_count2 = 0
-	failure_count_inapinted = 0
+	failure_count_inpainted = 0
+	failure_count_and = 0
+
+	tracking_started_orig = False
+	tracking_started_inpainted = False
 
 	with mp_hands.Hands(
 		model_complexity=model_complexity,
@@ -216,32 +223,41 @@ if __name__ == '__main__':
 			mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
 
 			frame_count += 1
+			failure_and = True
 			if mp_result_orig and mp_result_orig.multi_hand_landmarks:
+				tracking_started_orig = True
 				f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
 				_f_with_landmark = f.copy()
 				_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
 				f_with_landmark = _f_with_landmark
+				failure_and = False
 			else:
-				failure_count_orig += 1
+				if tracking_started_orig:
+					failure_count_orig += 1
 				f_with_landmark = f
 
-			frame_count2 += 1
 			if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
+				tracking_started_inpainted = True
 				f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
 				_f_inpainted_with_landmark = f_inpainted.copy()
 				_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
 				f_inpainted_with_landmark = _f_inpainted_with_landmark
+				failure_and = False
 			else:
-				failure_count_inapinted += 1
+				if tracking_started_inpainted:
+					failure_count_inpainted += 1
 				f_inpainted_with_landmark = f_inpainted
+
+			if failure_and and tracking_started_orig and tracking_started_inpainted:
+				failure_count_and += 1
 
 			info_message = f"""Parameters
     min_detection_confidence: {min_detection_confidence}
     min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-    Original video:  {failure_count_orig:4}
-    Inpainted video: {failure_count_inapinted:4}
+    Original video:  {failure_count_orig:4} [{failure_count_orig - failure_count_and}]
+    Inpainted video: {failure_count_inpainted:4} [{failure_count_inpainted - failure_count_and}]
 
 Info
 """
@@ -266,6 +282,8 @@ Info
 			# 	time.sleep(delay)
 
 			progress.update()
+
+	print('Result has been saved to \'', output_path, '\'')
 
 	writer.release()
 	cv2.destroyAllWindows()
