@@ -649,6 +649,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					x2 = np.max(landmark_coords[:, 0])
 					y2 = np.max(landmark_coords[:, 1])
 
+					# """
 					# crop_margin = 0.25
 					# margin_x = int((x2 - x1) * crop_margin)
 					# margin_y = int((y2 - y1) * crop_margin)
@@ -690,6 +691,33 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					presitions = [calc_landmark_presition(mask, landmark_coords) for mask in everything_masks]
 					presitions_argmax = argmax(presitions)
 					mask_hand = everything_masks[presitions_argmax]
+					# """
+					"""
+					margin = int(max(x2-x1, y2-y1) * 0.3)
+					x1 -= margin
+					x2 += margin
+					y1 -= margin
+					y2 += margin
+
+					x1 = max(x1, 0)
+					y1 = max(y1, 0)
+					x2 = min(x2, w-1)
+					y2 = min(y2, h-1)
+
+					coords_no_hand = [
+						[x1, y1],
+						[x1, y2],
+						[x2, y1],
+						[x2, y2],
+						[x1, (y1+y2)//2],
+						[x2, (y1+y2)//2],
+						[(x1+x2)//2, y1],
+						[(x1+x2)//2, y2],
+					]
+
+					mask_hand = do_fastsam_points(color_image, np.vstack([landmark_coords, coords_no_hand]), [1]*len(landmark_coords) + [0]*len(coords_no_hand))[0]
+					# """
+					# mask_hand = do_fastsam_text(color_image, 'palm')[0]
 
 					mask_hand2, prob, _ = tracker.track(color_image, mask_hand)
 					tracker_initialized = True
@@ -773,6 +801,52 @@ def do_fastsam(img: np.ndarray, plot_to_result=False):
 	# cv2.imshow("FastSam Visualization", fastsam_visualization)
 
 	masks = [ann.cpu().numpy() == 1 for ann in anns]
+
+	if plot_to_result:
+		return masks, plot
+	else:
+		return masks
+
+def do_fastsam_text(img: np.ndarray, text_prompt, plot_to_result=False):
+	# with time_keeper("FastSAM everything_results"):
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+
+	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+
+	# Text Prompt
+	anns = prompt_process.text_prompt(text=text_prompt)
+
+	if plot_to_result:
+		prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+		plot = prompt_process.plot_to_result(annotations=anns, mask_random_color=True)
+	# cv2.imshow("FastSam Visualization", fastsam_visualization)
+
+	masks = [ann == 1 for ann in anns]
+
+	if plot_to_result:
+		return masks, plot
+	else:
+		return masks
+
+def do_fastsam_points(img: np.ndarray, points, point_label, plot_to_result=False):
+
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+
+	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+
+	# Point prompt
+	# points default [[0,0]] [[x1,y1],[x2,y2]]
+	# point_label default [0] [1,0] 0:background, 1:foreground
+	anns = prompt_process.point_prompt(points, point_label)
+
+	if plot_to_result:
+		prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+		plot = prompt_process.plot_to_result(annotations=anns, mask_random_color=True)
+	# cv2.imshow("FastSam Visualization", fastsam_visualization)
+
+	masks = [ann == 1 for ann in anns]
 
 	if plot_to_result:
 		return masks, plot
