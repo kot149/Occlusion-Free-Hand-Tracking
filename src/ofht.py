@@ -677,15 +677,15 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 					x2 = min(x2, w-1)
 					y2 = min(y2, h-1)
 
-					color_image_crop = color_image[y1:y2, x1:x2, :]
+					# color_image_crop = color_image[y1:y2, x1:x2, :]
 
-					everything_masks = do_fastsam(color_image_crop)
+					everything_masks = do_fastsam(color_image)
 
-					# Revert cropping
-					for i, mask in enumerate(everything_masks):
-						tmp = zeros_bool.copy()
-						tmp[y1:y2, x1:x2] = mask
-						everything_masks[i] = tmp
+					# # Revert cropping
+					# for i, mask in enumerate(everything_masks):
+					# 	tmp = zeros_bool.copy()
+					# 	tmp[y1:y2, x1:x2] = mask
+					# 	everything_masks[i] = tmp
 
 
 					presitions = [calc_landmark_presition(mask, landmark_coords) for mask in everything_masks]
@@ -768,10 +768,10 @@ import fastsam
 fastSAM_model = fastsam.FastSAM('model_checkpoint/FastSAM-x.pt')
 
 
-def do_fastsam(img: np.ndarray, plot_to_result=False):
+def do_fastsam(img: np.ndarray, imgsize=512, plot_to_result=False):
 	# with time_keeper("FastSAM everything_results"):
-	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
-	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=imgsize, conf=0.5, iou=0.7)
+	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=imgsize, conf=0.1, iou=0.5)
 
 	# with time_keeper("FastSAM prompt_process"):
 	# prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
@@ -809,8 +809,8 @@ def do_fastsam(img: np.ndarray, plot_to_result=False):
 
 def do_fastsam_text(img: np.ndarray, text_prompt, plot_to_result=False):
 	# with time_keeper("FastSAM everything_results"):
-	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
-	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+	# everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=624, conf=0.7, iou=0.7)
 
 	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 
@@ -831,8 +831,8 @@ def do_fastsam_text(img: np.ndarray, text_prompt, plot_to_result=False):
 
 def do_fastsam_points(img: np.ndarray, points, point_label, plot_to_result=False):
 
-	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
-	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=384, conf=0.1, iou=0.5)
+	# everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=256, conf=0.1, iou=0.5)
+	everything_results = fastSAM_model(img, device=device, retina_masks=True, imgsz=512, conf=0.7, iou=0.9)
 
 	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 
@@ -1278,7 +1278,8 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		_everything_masks = []
 		for m in everything_masks:
 			iou = calc_iou(mask_hand, m & mask_hand)
-			if not (iou > 0.75):
+			iou2 = calc_iou(m, m & mask_hand)
+			if not (iou > 0.75 or iou2 > 0.75):
 			# m_edge = mask_edge(m, thickness=30)
 			# if not (calc_iou(m_edge, m_edge & mask_hand_edge) > 0.5):
 				_everything_masks.append(m)
