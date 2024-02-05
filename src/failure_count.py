@@ -256,8 +256,8 @@ if __name__ == '__main__':
     min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-    Original video:  {failure_count_orig:4} [{failure_count_orig - failure_count_and}]
-    Inpainted video: {failure_count_inpainted:4} [{failure_count_inpainted - failure_count_and}]
+    Original video:  {failure_count_orig:4} [{failure_count_orig - failure_count_and}] / {frame_count}
+    Inpainted video: {failure_count_inpainted:4} [{failure_count_inpainted - failure_count_and}] / {frame_count}
 
 Info
 """
