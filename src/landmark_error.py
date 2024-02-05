@@ -305,8 +305,8 @@ if __name__ == '__main__':
   min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-  Original:  {failure_counts[1]:> 4} [{failure_counts_exc[1]}]
-  Inpainted: {failure_counts[2]:> 4} [{failure_counts_exc[2]}]
+  Original:  {failure_counts[1]:> 4} [{failure_counts_exc[1]}] / {frame_count}
+  Inpainted: {failure_counts[2]:> 4} [{failure_counts_exc[2]}] / {frame_count}
 
 Landmark coords error
   Original:  {f'{landmark_coords_errors[0][-1]:> 6.2f}' if landmark_coords[1] is not None else f'{"N/A":>6}'} ave {np.mean(landmark_coords_errors[0]):> 6.2f}
