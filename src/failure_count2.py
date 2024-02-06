@@ -258,7 +258,7 @@ if __name__ == '__main__':
 					failure_count_inpainted += 1
 				f_inpainted_with_landmark = f_inpainted
 
-			if failure_and and tracking_started_orig and tracking_started_inpainted:
+			if failure_and and tracking_started_orig and tracking_started_inpainted and is_occluded:
 				failure_count_and += 1
 
 			info_message = f"""Parameters
