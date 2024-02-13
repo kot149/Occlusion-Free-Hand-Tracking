@@ -30,12 +30,13 @@ input_filepath = r'record'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
-record_in_images = True
+record_in_images = False
 
 device = torch.device("cuda")
 
 if input_from_file and __name__ == '__main__':
-	input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+	# input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+	input_filepath = r'record/ex2_p1_1.mp4'
 	if not input_filepath:
 		exit(-1)
 	print("Input file: ", input_filepath)
@@ -178,15 +179,15 @@ def add_mask(image_base: np.ndarray, mask: np.ndarray, color=(0, 0, 255)):
 	result = image_base.copy()
 	color = np.array(color)
 
-	mask_color = zeros_color.copy()
-	mask_color[mask] = color
-	alpha = 0.3
+	# mask_color = zeros_color.copy()
+	# mask_color[mask] = color
+	# alpha = 0.3
 
-	result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
-	edge = mask_edge(mask, thickness=5)
-	result[edge] = color
+	# result[mask] = cv2.addWeighted(mask_color, alpha, result, 1-alpha, 0)[mask]
+	# edge = mask_edge(mask, thickness=5)
+	# result[edge] = color
 
-	# result[mask] = color
+	result[mask] = color
 
 	return result
 
@@ -595,6 +596,7 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 				color_image_no_pole = shm_rgbd['color_image_no_pole']
 			frame_no = shm_rgbd['frame_no']
 
+			# if (not tracker_initialized):
 			if (not tracker_initialized) or shm_flags['reset']:
 
 				mp_result = hands.process(bgr2rgb(color_image))
@@ -774,12 +776,12 @@ def do_fastsam(img: np.ndarray, imgsize=512, plot_to_result=False):
 	# everything_results = fastSAM_model(img, device=DEVICE, retina_masks=True, imgsz=imgsize, conf=0.1, iou=0.5)
 
 	# with time_keeper("FastSAM prompt_process"):
-	# prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+	prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 
 	# Everything Prompt
 	# with time_keeper("FastSAM anns"):
-	# anns = prompt_process.everything_prompt()
-	anns = everything_results[0].masks.data
+	anns = prompt_process.everything_prompt()
+	# anns = everything_results[0].masks.data
 
 	# Point prompt
 	# points default [[0,0]] [[x1,y1],[x2,y2]]
@@ -796,7 +798,7 @@ def do_fastsam(img: np.ndarray, imgsize=512, plot_to_result=False):
 	# with time_keeper("FastSAM plot_to_result"):
 	# global fastsam_visualization
 	if plot_to_result:
-		prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
+		# prompt_process = fastsam.FastSAMPrompt(img, everything_results, device=device)
 		plot = prompt_process.plot_to_result(annotations=anns, mask_random_color=True)
 	# cv2.imshow("FastSam Visualization", fastsam_visualization)
 
@@ -875,6 +877,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['start_time'] = time.time()
 
 		max_workers = 7
+		# max_workers = 3
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 
@@ -1154,10 +1157,11 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 	try:
 		everything_masks = do_fastsam(color_image_crop, plot_to_result=False)
 		# everything_masks, v = do_fastsam(color_image_crop, plot_to_result=True)
-		# _v = color_image.copy()
-		# _v[y1:y2, x1:x2, :] = v
+		# tmp = color_image.copy()
+		# tmp[y1:y2, x1:x2, :] = v
+		# v = tmp
 	except:
-		return error(message='FastSAM failed', reset=True)
+		return error(message='FastSAM failed', reset=False)
 
 	# Revert cropping
 	for i, m in enumerate(everything_masks):
@@ -1451,7 +1455,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		shm_sa['color_image_no_pole'] = color_image_no_pole
 	shm_sa['frame_no'] = frame_no
 
-
+	# shm_sa['test'] = v
 	shm_sa['error_message'] = error_message
 
 
@@ -1620,7 +1624,8 @@ if __name__ == "__main__" :
 				depth_image = shm_rgbd['depth_image']
 				color_image_with_landmarks = shm_mediapipe['color_image_with_landmarks']
 
-				# color_image2 = shm_mediapipe['color_image']
+				color_image2 = shm_mediapipe['color_image']
+				depth_image2 = shm_mediapipe['depth_image']
 				# mask_hand = shm_mediapipe['mask_hand']
 				# color_image2 = add_mask(color_image2, mask_hand)
 
@@ -1628,11 +1633,17 @@ if __name__ == "__main__" :
 				if save_no_pole_frame:
 					color_image_no_pole = shm_sa['color_image_no_pole']
 				color_image_with_mask = shm_sa['color_image_with_mask']
-				masked_hand_image = shm_sa['color_image_with_mask_hand']
+				color_image_with_mask_hand = shm_sa['color_image_with_mask_hand']
 				mask_occluder = shm_sa['mask_occluder']
+				mask_hand = shm_sa['mask_hand']
 				lack = shm_sa['lack']
 				test = shm_sa['test']
 				hand_bbox_size = shm_sa['hand_bbox_size']
+
+				# if color_image3 is not None and color_image3.any() and mask_hand is not None and mask_hand.any():
+				# 	color_image_with_mask_hand_edge = add_mask(color_image3, mask=mask_edge(mask_hand, thickness=15))
+				# else:
+				# 	color_image_with_mask_hand_edge = None
 
 				frame_no_prev = frame_no
 				frame_no = shm_sa['frame_no']
@@ -1659,13 +1670,14 @@ if __name__ == "__main__" :
 				# cv2.putText(info_image, str(shm_sa['fps']), (40, 210), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 
 				image = xstack([
-					color_image
-					, depth_image
+					color_image2
+					, depth_image2
 					# , color_image_with_landmarks
-					, masked_hand_image
+					, color_image_with_mask_hand
 					, color_image_with_mask
 					, info_image
-					# , test
+					, test
+					# , color_image_with_mask_hand_edge
 					# , color_image_with_landmarks
 				])
 
