@@ -13,6 +13,8 @@ from tqdm import tqdm
 import joblib
 from tkinter import filedialog
 
+import argparse
+
 def read_frames_from_images(input_dir: str):
 	count = 1
 	filepath_list = []
@@ -145,15 +147,44 @@ def draw_landmarks(image, multi_hand_landmarks):
 
 	return image
 
-if __name__ == '__main__':
-	model_complexity = 0
-	min_detection_confidence = 0.5
-	min_tracking_confidence = 0.5
 
-	input_dir = r'output'
-	input_dir = filedialog.askdirectory(initialdir = input_dir)
-	if not input_dir:
-		exit(-1)
+class DummyWriter():
+	def __init__(self) -> None:
+		pass
+
+	def write(*_):
+		pass
+
+	def release():
+		pass
+
+if __name__ == '__main__':
+	parser = argparse.ArgumentParser()
+
+	parser.add_argument('-i', '--input_dir', default=None)
+	parser.add_argument('-s', '--save_result', action='store_true')
+	parser.add_argument('-o', '--output_filename', default='failure_count.mp4')
+	# parser.add_argument('', default=None)
+	# parser.add_argument('', default=None)
+
+	parser.add_argument('--model_complexity', default=0)
+	parser.add_argument('--min_detection_confidence', default=0.5)
+	parser.add_argument('--min_tracking_confidence', default=0.5)
+
+	args = parser.parse_args()
+
+	model_complexity = args.model_complexity
+	min_detection_confidence = args.min_detection_confidence
+	min_tracking_confidence = args.min_tracking_confidence
+
+	input_dir = args.input_dir
+	if input_dir is None:
+		input_dir = r'output'
+		input_dir = filedialog.askdirectory(initialdir = input_dir)
+		if not input_dir:
+			exit(-1)
+
+	save_result = args.save_result
 
 	print('input:', input_dir)
 
@@ -173,15 +204,21 @@ if __name__ == '__main__':
 	if True:
 		fps = 29
 
-	output_path = os.path.join(input_dir, 'failure_count.mp4')
+	output_filename = args.output_filename
+	if not output_filename.endswith('.mp4'):
+		output_filename += '.mp4'
+	output_path = os.path.join(input_dir, output_filename)
 
-	writer = cv2.VideoWriter(
-		output_path,
-		cv2.VideoWriter_fourcc(*'H264'),
-		fps=fps,
-		frameSize=(640*3, 360*2),
-		isColor=True
-	)
+	if save_result:
+		writer = cv2.VideoWriter(
+			output_path,
+			cv2.VideoWriter_fourcc(*'H264'),
+			fps=fps,
+			frameSize=(640*3, 360*2),
+			isColor=True
+		)
+	else:
+		writer = DummyWriter()
 
 	zeros_color = np.zeros_like(frames_rgb[0])
 
@@ -193,97 +230,106 @@ if __name__ == '__main__':
 	crop_y1 = 0
 	crop_y2 = 360
 
-	frame_count = 0
-	failure_count_orig = 0
-	failure_count_inpainted = 0
-	failure_count_and = 0
+	while True:
 
-	tracking_started_orig = False
-	tracking_started_inpainted = False
+		frame_count = 0
+		failure_count_orig = 0
+		failure_count_inpainted = 0
+		failure_count_and = 0
 
-	with mp_hands.Hands(
-		model_complexity=model_complexity,
-		min_detection_confidence=min_detection_confidence,
-		min_tracking_confidence=min_tracking_confidence,
-		# num_hands=1
-	) as hands_orig, mp_hands.Hands(
-		model_complexity=model_complexity,
-		min_detection_confidence=min_detection_confidence,
-		min_tracking_confidence=min_tracking_confidence,
-		# num_hands=1
-	) as hands_inpainted:
-		progress = tqdm(total=len(frames_rgb))
-		for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
-			t = time.time()
+		tracking_started_orig = False
+		tracking_started_inpainted = False
 
-			f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
-			f_inpainted_crop = f_inpainted[crop_y1:crop_y2, crop_x1:crop_x2, :]
+		with mp_hands.Hands(
+			model_complexity=model_complexity,
+			min_detection_confidence=min_detection_confidence,
+			min_tracking_confidence=min_tracking_confidence,
+			# num_hands=1
+		) as hands_orig, mp_hands.Hands(
+			model_complexity=model_complexity,
+			min_detection_confidence=min_detection_confidence,
+			min_tracking_confidence=min_tracking_confidence,
+			# num_hands=1
+		) as hands_inpainted:
+			progress = tqdm(total=len(frames_rgb))
+			for f, f_masked, f_inpainted in zip(frames_rgb, frames_rgb_masked, frames_inpainted):
+				t = time.time()
 
-			mp_result_orig = hands_orig.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
-			mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
+				f_crop = f[crop_y1:crop_y2, crop_x1:crop_x2, :]
+				f_inpainted_crop = f_inpainted[crop_y1:crop_y2, crop_x1:crop_x2, :]
 
-			frame_count += 1
-			failure_and = True
-			if mp_result_orig and mp_result_orig.multi_hand_landmarks:
-				tracking_started_orig = True
-				f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
-				_f_with_landmark = f.copy()
-				_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
-				f_with_landmark = _f_with_landmark
-				failure_and = False
-			else:
-				if tracking_started_orig:
-					failure_count_orig += 1
-				f_with_landmark = f
+				mp_result_orig = hands_orig.process(cv2.cvtColor(f_crop, cv2.COLOR_BGR2RGB))
+				mp_result_inpainted = hands_inpainted.process(cv2.cvtColor(f_inpainted_crop, cv2.COLOR_BGR2RGB))
 
-			if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
-				tracking_started_inpainted = True
-				f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
-				_f_inpainted_with_landmark = f_inpainted.copy()
-				_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
-				f_inpainted_with_landmark = _f_inpainted_with_landmark
-				failure_and = False
-			else:
-				if tracking_started_inpainted:
-					failure_count_inpainted += 1
-				f_inpainted_with_landmark = f_inpainted
+				frame_count += 1
+				failure_and = True
+				if mp_result_orig and mp_result_orig.multi_hand_landmarks:
+					tracking_started_orig = True
+					f_with_landmark = draw_landmarks(f_crop, mp_result_orig.multi_hand_landmarks)
+					_f_with_landmark = f.copy()
+					_f_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_with_landmark
+					f_with_landmark = _f_with_landmark
+					failure_and = False
+				else:
+					if tracking_started_orig:
+						failure_count_orig += 1
+					f_with_landmark = f
 
-			if failure_and and tracking_started_orig and tracking_started_inpainted:
-				failure_count_and += 1
+				if mp_result_inpainted and mp_result_inpainted.multi_hand_landmarks:
+					tracking_started_inpainted = True
+					f_inpainted_with_landmark = draw_landmarks(f_inpainted_crop, mp_result_inpainted.multi_hand_landmarks)
+					_f_inpainted_with_landmark = f_inpainted.copy()
+					_f_inpainted_with_landmark[crop_y1:crop_y2, crop_x1:crop_x2, :] = f_inpainted_with_landmark
+					f_inpainted_with_landmark = _f_inpainted_with_landmark
+					failure_and = False
+				else:
+					if tracking_started_inpainted:
+						failure_count_inpainted += 1
+					f_inpainted_with_landmark = f_inpainted
 
-			info_message = f"""Parameters
-    min_detection_confidence: {min_detection_confidence}
-    min_tracking_confidence: {min_tracking_confidence}
+				if failure_and and tracking_started_orig and tracking_started_inpainted:
+					failure_count_and += 1
+
+				info_message = f"""Parameters
+  min_detection_confidence: {min_detection_confidence}
+  min_tracking_confidence: {min_tracking_confidence}
 
 Tracking failure count
-    Original video:  {failure_count_orig:4} [{failure_count_orig - failure_count_and}] / {frame_count}
-    Inpainted video: {failure_count_inpainted:4} [{failure_count_inpainted - failure_count_and}] / {frame_count}
-
-Info
+  Original video:  {failure_count_orig:4} [{failure_count_orig - failure_count_and}] / {frame_count}
+  Inpainted video: {failure_count_inpainted:4} [{failure_count_inpainted - failure_count_and}] / {frame_count}
 """
-			row = 30
-			info_image = zeros_color.copy()
+				row = 30
+				info_image = zeros_color.copy()
 
-			for line in info_message.split('\n'):
-				cv2.putText(info_image, line, (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
-				row += 30
+				for line in info_message.split('\n'):
+					cv2.putText(info_image, line, (40, row), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+					row += 30
 
 
-			result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
-			writer.write(result)
-			cv2.imshow('result', result)
+				result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
+				writer.write(result)
+				cv2.imshow('result', result)
 
-			key = cv2.waitKey(1)
-			if key == 27:
-				break
+				key = cv2.waitKey(1)
+				if key == 32: # space
+					while True:
+						key = cv2.waitKey(1)
+						if key == 32 or key == 27:
+							break
+				if key == 27:
+					break
 
-			delay = 1/fps - (time.time() - t)
-			# if delay > 0:
-			# 	time.sleep(delay)
+				delay = 1/fps - (time.time() - t)
+				# if delay > 0:
+				# 	time.sleep(delay)
 
-			progress.update()
+				progress.update()
 
-	print('Result has been saved to \'', output_path, '\'')
+		writer.release()
+		print(f'Result has been saved to \'{output_path}\'')
+		writer = DummyWriter()
 
-	writer.release()
+		if key == 27:
+			break
+
 	cv2.destroyAllWindows()
