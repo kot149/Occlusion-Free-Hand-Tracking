@@ -25,24 +25,27 @@ w, h = 640, 360
 
 input_fps = 30
 
-input_from_file = True
+input_from_file = False
 input_filepath = r'record'
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
-record_in_images = False
+record_in_images = True
 
 device = torch.device("cuda")
 
-if input_from_file and __name__ == '__main__':
-	# input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
-	input_filepath = r'record/ex2_p1_1.mp4'
-	if not input_filepath:
-		exit(-1)
-	print("Input file: ", input_filepath)
-	if input_filepath.endswith('_p.mp4'):
-		save_no_pole_frame = True
-		no_pole_path = input_filepath.replace('_p.mp4', '.mp4')
+if __name__ == '__main__':
+	if input_from_file:
+		input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+		# input_filepath = r'record/ex2_p1_1.mp4'
+		if not input_filepath:
+			exit(-1)
+		print("Input file: ", input_filepath)
+		if input_filepath.endswith('_p.mp4'):
+			save_no_pole_frame = True
+			no_pole_path = input_filepath.replace('_p.mp4', '.mp4')
+		else:
+			save_no_pole_frame = False
 	else:
 		save_no_pole_frame = False
 
@@ -1277,7 +1280,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 
 	# Remove mask_hand from everything_masks
 
-	mask_hand_edge = mask_edge(mask_hand, thickness=30)
+	mask_hand_edge = mask_edge(mask_hand, thickness=10)
 	if not hand_invisible:
 		_everything_masks = []
 		for m in everything_masks:
@@ -1324,7 +1327,7 @@ def fastsam_task(shm_mediapipe, shm_sa, shm_flags):
 		for m in everything_masks:
 			# if calc_iou(mask, mask_hand) > 0.8:
 			# 	continue
-			m_depth_stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=5)
+			m_depth_stat = mask_depth_stat(m, depth_image, depth_valid_area, erosion_kernel_size=-1)
 			if m_depth_stat is None:
 				continue
 			# a = -1
