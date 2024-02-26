@@ -14,6 +14,7 @@ from tkinter import filedialog
 from icecream import ic
 from tqdm import tqdm
 import joblib
+import argparse
 
 ###############################################################################
 # Config
@@ -25,8 +26,7 @@ w, h = 640, 360
 
 input_fps = 30
 
-input_from_file = False
-input_filepath = r'record'
+# input_from_file = False
 
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
@@ -35,12 +35,35 @@ record_in_images = True
 device = torch.device("cuda")
 
 if __name__ == '__main__':
-	if input_from_file:
-		input_filepath = filedialog.askopenfilename(initialdir = input_filepath)
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-f', '--input_from_file', action='store_true')
+	parser.add_argument('-i', '--input_filepath', default=None)
+	parser.add_argument('-s', '--save_result', action='store_true')
+	parser.add_argument('-o', '--output_dir', default=time.strftime('%Y-%m%d-%H%M%S'))
+	parser.add_argument('-n', '--max_workers', type=int, default=7)
+	parser.add_argument('-e', '--auto_exit', action='store_true')
+	# parser.add_argument('', default=None)
+	# parser.add_argument('', default=None)
+	# parser.add_argument('', default=None)
+
+	args = parser.parse_args()
+
+	input_from_file = args.input_from_file
+	input_filepath = args.input_filepath
+	output_filename = args.output_dir
+	save_result = args.save_result
+	auto_exit = args.auto_exit
+
+	if input_from_file or input_filepath:
+		input_from_file = True
+		if input_filepath is None:
+			input_filepath = filedialog.askopenfilename(initialdir='record')
 		# input_filepath = r'record/ex2_p1_1.mp4'
 		if not input_filepath:
 			exit(-1)
 		print("Input file: ", input_filepath)
+
+		# Composite pole
 		if input_filepath.endswith('_p.mp4'):
 			save_no_pole_frame = True
 			no_pole_path = input_filepath.replace('_p.mp4', '.mp4')
@@ -879,7 +902,7 @@ def fastsam_task_scheduler(shm_mediapipe, shm_sa, shm_flags):
 		# shared_fps['fps'] = 0
 		# shared_fps['start_time'] = time.time()
 
-		max_workers = 7
+		max_workers = args.max_workers
 		# max_workers = 3
 		# with ThreadPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
 		with ProcessPoolExecutor(max_workers=max_workers, initializer=fastsam_subprocess_init) as pool:
@@ -1533,77 +1556,85 @@ if __name__ == "__main__" :
 			shm_sa['error_message'] = ''
 
 			output_dir = 'output'
-			if input_from_file:
-				output_filename = os.path.splitext(os.path.basename((input_filepath)))[0]
-			else:
-				output_filename = time.strftime('%Y-%m%d-%H%M%S')
+			if not output_filename:
+				if input_from_file:
+					output_filename = os.path.splitext(os.path.basename((input_filepath)))[0]
+				else:
+					output_filename = time.strftime('%Y-%m%d-%H%M%S')
 			output_filepath = os.path.join(output_dir, output_filename)
 			os.makedirs(output_dir, exist_ok=True)
 
-			if record_in_video_cv2:
-				writer = cv2.VideoWriter(
-					output_filepath,
-					cv2.VideoWriter_fourcc(*'mp4v'),
-					fps=30,
-					frameSize=(w*2, h),
-					isColor=True
-				)
-				output_filename += '.mp4'
-				def write(color_image, mask_image):
-					writer.write(np.hstack([
-						color_image,
-						gray2rgb(mask_image)
-					]))
 
-				def close_writer():
-					writer.release()
+			# ---------------------------------------------------------
+			#  Record settings
+			# ---------------------------------------------------------
+			if save_result:
+				if record_in_video_cv2:
+					writer = cv2.VideoWriter(
+						output_filepath,
+						cv2.VideoWriter_fourcc(*'mp4v'),
+						fps=30,
+						frameSize=(w*2, h),
+						isColor=True
+					)
+					output_filename += '.mp4'
+					def write(color_image, mask_image):
+						writer.write(np.hstack([
+							color_image,
+							gray2rgb(mask_image)
+						]))
 
-			elif record_in_video_ffmpeg:
-				process = (
-					ffmpeg
-					.input('pipe:', format='rawvideo', pix_fmt='bgr24',
-						s=f'{w*2}x{h}', use_wallclock_as_timestamps=1)
-					.output(output_filepath, vsync='vfr', r=input_fps)
-					.overwrite_output()
-					.run_async(pipe_stdin=True)
-				)
+					def close_writer():
+						writer.release()
 
-				output_filename += '.mp4'
+				elif record_in_video_ffmpeg:
+					process = (
+						ffmpeg
+						.input('pipe:', format='rawvideo', pix_fmt='bgr24',
+							s=f'{w*2}x{h}', use_wallclock_as_timestamps=1)
+						.output(output_filepath, vsync='vfr', r=input_fps)
+						.overwrite_output()
+						.run_async(pipe_stdin=True)
+					)
 
-				def write(color_image, mask_image):
-					process.stdin.write(np.hstack([
-						color_image,
-						gray2rgb(mask_image)
-					]).tobytes())
+					output_filename += '.mp4'
 
-				def close_writer():
-					process.stdin.close()
-					process.wait()
+					def write(color_image, mask_image):
+						process.stdin.write(np.hstack([
+							color_image,
+							gray2rgb(mask_image)
+						]).tobytes())
 
-			elif record_in_images:
-				output_dir = os.path.join(output_dir, output_filename)
-				output_dir_rgb = os.path.join(output_dir, 'rgb')
-				output_dir_mask = os.path.join(output_dir, 'mask')
-				os.makedirs(output_dir_rgb, exist_ok=True)
-				os.makedirs(output_dir_mask, exist_ok=True)
-				if save_no_pole_frame:
-					output_dir_no_pole = os.path.join(output_dir, 'rgb_no_pole')
-					os.makedirs(output_dir_no_pole, exist_ok=True)
+					def close_writer():
+						process.stdin.close()
+						process.wait()
 
-				def write(color_image, mask_image, color_image_no_pole=None):
-					write.n += 1
-					filename = f'{write.n:0>5}.png'
-					output_filename_rgb = os.path.join(output_dir_rgb, filename)
-					output_filename_mask = os.path.join(output_dir_mask, filename)
-					cv2.imwrite(output_filename_rgb, color_image)
-					cv2.imwrite(output_filename_mask, bool2uint8(mask_image))
+				elif record_in_images:
+					output_dir = os.path.join(output_dir, output_filename)
+					output_dir_rgb = os.path.join(output_dir, 'rgb')
+					output_dir_mask = os.path.join(output_dir, 'mask')
+					os.makedirs(output_dir_rgb, exist_ok=True)
+					os.makedirs(output_dir_mask, exist_ok=True)
 					if save_no_pole_frame:
-						output_filename_no_pole = os.path.join(output_dir_no_pole, filename)
-						cv2.imwrite(output_filename_no_pole, color_image_no_pole)
-				write.n = 0
+						output_dir_no_pole = os.path.join(output_dir, 'rgb_no_pole')
+						os.makedirs(output_dir_no_pole, exist_ok=True)
 
-				def close_writer():
-					pass
+					def write(color_image, mask_image, color_image_no_pole=None):
+						write.n += 1
+						filename = f'{write.n:0>5}.png'
+						output_filename_rgb = os.path.join(output_dir_rgb, filename)
+						output_filename_mask = os.path.join(output_dir_mask, filename)
+						cv2.imwrite(output_filename_rgb, color_image)
+						cv2.imwrite(output_filename_mask, bool2uint8(mask_image))
+						if save_no_pole_frame:
+							output_filename_no_pole = os.path.join(output_dir_no_pole, filename)
+							cv2.imwrite(output_filename_no_pole, color_image_no_pole)
+					write.n = 0
+
+					def close_writer():
+						pass
+
+				print('Output:', output_filename)
 
 			else:
 				def write(_, __):
@@ -1622,6 +1653,8 @@ if __name__ == "__main__" :
 			# Show result
 			# while True:
 			frame_no = -1
+			is_recording = False
+			recording_indicator = 'Recording not started'
 			while not shm_flags['end_flag']:
 				color_image = shm_rgbd['color_image']
 				depth_image = shm_rgbd['depth_image']
@@ -1660,6 +1693,11 @@ if __name__ == "__main__" :
 				info_image = zeros_color.copy()
 				cv2.putText(info_image, f"Input FPS: {shm_rgbd['fps']:.2f}", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 				cv2.putText(info_image, f"Output FPS: {shm_sa['fps']:.2f}", (10, 60), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+				if is_recording:
+					color = (0, 0, 2555)
+				else:
+					color = (0, 255, 0)
+				cv2.putText(info_image, recording_indicator, (10, 90), cv2.FONT_HERSHEY_DUPLEX, 1.0, color, thickness=2)
 
 
 				cv2.putText(info_image, 'Info', (10, 120), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
@@ -1684,7 +1722,7 @@ if __name__ == "__main__" :
 					# , color_image_with_landmarks
 				])
 
-				if frame_no > frame_no_prev:
+				if frame_no > frame_no_prev and is_recording:
 					if save_no_pole_frame:
 						write(color_image3, mask_occluder, color_image_no_pole)
 					else:
@@ -1697,7 +1735,18 @@ if __name__ == "__main__" :
 					shm_flags['end_flag'] = True
 					cv2.destroyAllWindows()
 					break
-				elif key == ord('r'):
+				elif key == ord('r') or key == 13: # R or Enter
+					if is_recording:
+						is_recording = False
+						recording_indicator = 'Recording stopped'
+						if auto_exit:
+							shm_flags['end_flag'] = True
+							cv2.destroyAllWindows()
+							break
+					else:
+						is_recording = True
+						recording_indicator = 'Recording...'
+				elif key == 18: # Ctrl+R
 					shm_flags['reset'] = True
 					shm_mediapipe['hand_bbox_size_adjust_count'] = 0
 
