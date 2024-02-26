@@ -155,7 +155,7 @@ class DummyWriter():
 	def write(*_):
 		pass
 
-	def release():
+	def release(*_):
 		pass
 
 if __name__ == '__main__':
