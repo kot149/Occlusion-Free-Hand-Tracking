@@ -306,7 +306,7 @@ Tracking failure count
 					row += 30
 
 
-				result = xstack([f, f_masked, f_inpainted, f_with_landmark, f_inpainted_with_landmark, info_image])
+				result = xstack([f, f_inpainted, f_masked, f_with_landmark, f_inpainted_with_landmark, info_image])
 				writer.write(result)
 				cv2.imshow('result', result)
 
