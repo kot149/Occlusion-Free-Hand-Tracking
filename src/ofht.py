@@ -1654,7 +1654,8 @@ if __name__ == "__main__" :
 			# while True:
 			frame_no = -1
 			is_recording = False
-			recording_indicator = 'Recording not started'
+			recording_start_time = time.time()
+
 			while not shm_flags['end_flag']:
 				color_image = shm_rgbd['color_image']
 				depth_image = shm_rgbd['depth_image']
@@ -1693,10 +1694,17 @@ if __name__ == "__main__" :
 				info_image = zeros_color.copy()
 				cv2.putText(info_image, f"Input FPS: {shm_rgbd['fps']:.2f}", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 				cv2.putText(info_image, f"Output FPS: {shm_sa['fps']:.2f}", (10, 60), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
+
+				if not is_recording and mask_hand is not None:
+					is_recording = True
+					recording_start_time = time.time()
+
 				if is_recording:
-					color = (0, 0, 2555)
+					color = (0, 0, 255)
+					recording_indicator = f'Recording... {time.time() - recording_start_time:4.2f}s elapsed'
 				else:
 					color = (0, 255, 0)
+					recording_indicator = 'Recording not started'
 				cv2.putText(info_image, recording_indicator, (10, 90), cv2.FONT_HERSHEY_DUPLEX, 1.0, color, thickness=2)
 
 
@@ -1738,14 +1746,13 @@ if __name__ == "__main__" :
 				elif key == ord('r') or key == 13: # R or Enter
 					if is_recording:
 						is_recording = False
-						recording_indicator = 'Recording stopped'
 						if auto_exit:
 							shm_flags['end_flag'] = True
 							cv2.destroyAllWindows()
 							break
 					else:
 						is_recording = True
-						recording_indicator = 'Recording...'
+						recording_start_time = time.time()
 				elif key == 18: # Ctrl+R
 					shm_flags['reset'] = True
 					shm_mediapipe['hand_bbox_size_adjust_count'] = 0

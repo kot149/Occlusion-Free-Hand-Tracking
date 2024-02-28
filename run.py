@@ -24,8 +24,8 @@ run_command([
 	'conda', 'activate', 'ofht', '&&'
 	, 'python', 'src/ofht.py'
 	, '-s' # Save result
-	, '-i', 'record/ex3_p2_1.mp4' # Input file
-	, '-n', '3' # max_workers
+	# , '-i', 'record/ex3_p2_1.mp4' # Input file
+	, '-n', '7' # max_workers
 	, '-o', output_path # Output folder
 	, '-e' # Exit on record stop
 ])
