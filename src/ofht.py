@@ -26,11 +26,13 @@ w, h = 640, 360
 
 input_fps = 30
 
-# input_from_file = False
+input_from_file = True
+input_filepath = r'record/ex7_p2_1.mp4'
 
+save_result = False
 record_in_video_cv2 = False
 record_in_video_ffmpeg = False
-record_in_images = True
+record_in_images = False
 
 device = torch.device("cuda")
 
@@ -40,7 +42,7 @@ if __name__ == '__main__':
 	parser.add_argument('-i', '--input_filepath', default=None)
 	parser.add_argument('-s', '--save_result', action='store_true')
 	parser.add_argument('-o', '--output_dir', default=time.strftime('%Y-%m%d-%H%M%S'))
-	parser.add_argument('-n', '--max_workers', type=int, default=7)
+	parser.add_argument('-n', '--max_workers', type=int, default=3)
 	parser.add_argument('-e', '--auto_exit', action='store_true')
 	# parser.add_argument('', default=None)
 	# parser.add_argument('', default=None)
@@ -48,10 +50,13 @@ if __name__ == '__main__':
 
 	args = parser.parse_args()
 
-	input_from_file = args.input_from_file
-	input_filepath = args.input_filepath
+	if not input_from_file:
+		input_from_file = args.input_from_file
+	if not input_filepath:
+		input_filepath = args.input_filepath
 	output_filename = args.output_dir
-	save_result = args.save_result
+	if not save_result:
+		save_result = args.save_result
 	auto_exit = args.auto_exit
 
 	if input_from_file or input_filepath:
@@ -351,7 +356,7 @@ def xstack(imgs : list):
 import pyrealsense2 as rs
 
 def depth_scale(depth_frame: rs.depth_frame):
-	scope_in_meter = (0.3, 1.5) # [meter]
+	scope_in_meter = (0.3, 1) # [meter]
 
 	depth_image = np.asanyarray(depth_frame.get_data())
 	dtype = depth_image.dtype
@@ -1695,7 +1700,7 @@ if __name__ == "__main__" :
 				cv2.putText(info_image, f"Input FPS: {shm_rgbd['fps']:.2f}", (10, 30), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 				cv2.putText(info_image, f"Output FPS: {shm_sa['fps']:.2f}", (10, 60), cv2.FONT_HERSHEY_DUPLEX, 1.0, (255, 255, 255), thickness=2)
 
-				if not is_recording and mask_hand is not None:
+				if save_result and (not is_recording) and (mask_hand is not None):
 					is_recording = True
 					recording_start_time = time.time()
 
