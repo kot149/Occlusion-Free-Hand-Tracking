@@ -165,8 +165,9 @@ doc/
 src/test_files/test.py
 src/test_files/test2.py
 
-# E2FDVI
+# Libraries
 src/E2FGVI
+src/MobileSAM
 
 # Track-Anything
 # src/track_anything
