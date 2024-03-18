@@ -792,6 +792,23 @@ def mediapipe_task(shm_rgbd, shm_mediapipe, shm_flags):
 	shm_flags['mediapipe_task_closed'] = True
 	print("* MediaPipe Task Closed")
 
+###############################################################################
+# MobileSAM
+###############################################################################
+from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+
+model_type = "vit_t"
+sam_checkpoint = "model_checkpoint\mobile_sam.pt"
+
+mobile_sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+mobile_sam.to(device=device)
+mobile_sam.eval()
+
+mask_generator = SamAutomaticMaskGenerator(mobile_sam)
+
+def do_mobilesam(img, imgsize=512, plot_to_result=False):
+	masks = mask_generator.generate(img)
+	return [m['segmentation'] for m in masks]
 
 ###############################################################################
 # FastSAM
