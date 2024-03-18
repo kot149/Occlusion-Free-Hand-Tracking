@@ -164,6 +164,7 @@ doc/
 # Test file
 src/test_files/test.py
 src/test_files/test2.py
+src/test.py
 
 # Libraries
 src/E2FGVI
